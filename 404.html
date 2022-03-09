@@ -1,2 +1,5 @@
-<pre>404
-</pre>
+<pre id="x">404</pre>
+<script>
+	x = document.getElementById('x').innerHTML = localStorage.getItem('404') || 404;
+	localStorage.setItem('404', ++x);
+</script>
