@@ -1,0 +1,5 @@
+# security.txt for mxmv.ru
+Contact: mailto:security@mxmv.ru
+# Policy file describing scope and safe testing
+Policy: https://mxmv.ru/.well-known/security-policy.html
+Preferred-Languages: en
