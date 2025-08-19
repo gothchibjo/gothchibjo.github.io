@@ -6,24 +6,22 @@
 <style>
 body {
   cursor: text;
+  color: black;
+  background: white;
+  transition: background 0.3s ease, color 0.3s ease;
 }
-blink, .blink {
-  -webkit-animation: blink 1s step-end infinite;
-  -moz-animation: blink 1s step-end infinite;
-  -o-animation: blink 1s step-end infinite;
+.blink {
   animation: blink 1s step-end infinite;
-}
-@-webkit-keyframes blink {
-  67% { opacity: 0 }
-}
-@-moz-keyframes blink {
-  67% { opacity: 0 }
-}
-@-o-keyframes blink {
-  67% { opacity: 0 }
 }
 @keyframes blink {
   67% { opacity: 0 }
+}
+/* Automatic dark theme */
+@media (prefers-color-scheme: dark) {
+  body {
+    color: white;
+    background: black;
+  }
 }
 </style>
 </head>
