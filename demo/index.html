@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Робот-курьер: визуализация алгоритма</title>
+  <style>
+    :root {
+      --bg-1: #f7fbff;
+      --bg-2: #eaf4ea;
+      --card: #ffffff;
+      --text: #1f2a37;
+      --muted: #556275;
+      --line: #cfd9e6;
+      --active: #0e7490;
+      --active-soft: #e0f2fe;
+      --ok: #0f9d58;
+      --warn: #f59e0b;
+      --bad: #dc2626;
+      --shadow: 0 10px 30px rgba(19, 44, 83, 0.10);
+      --radius: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Nunito", "Segoe UI", sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at 20% 0%, var(--bg-1) 0%, var(--bg-2) 100%);
+      min-height: 100vh;
+    }
+
+    .wrap {
+      width: min(920px, 100%);
+      margin: 0 auto;
+      padding: 16px 14px 28px;
+    }
+
+    .hero {
+      background: linear-gradient(140deg, #ffffff 0%, #ecf8ff 45%, #effbed 100%);
+      border: 1px solid #d9e7f3;
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .hero h1 {
+      margin: 0 0 8px;
+      font-size: clamp(20px, 5vw, 32px);
+      line-height: 1.1;
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(14px, 3.6vw, 16px);
+    }
+
+    .panel {
+      margin-top: 14px;
+      background: var(--card);
+      border-radius: 18px;
+      border: 1px solid #dce7f2;
+      box-shadow: var(--shadow);
+      padding: 14px;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .status-box {
+      border: 1px solid #dce7f2;
+      border-radius: 14px;
+      padding: 12px;
+      background: #fbfdff;
+    }
+
+    .label {
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #607086;
+      margin-bottom: 4px;
+      font-weight: 700;
+    }
+
+    .big {
+      font-size: clamp(16px, 4vw, 20px);
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .progress {
+      height: 12px;
+      border-radius: 999px;
+      background: #edf2f7;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+
+    .progress-bar {
+      width: 0;
+      height: 100%;
+      background: linear-gradient(90deg, #14b8a6, #22c55e);
+      transition: width 300ms ease;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .btn-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    button {
+      border: none;
+      border-radius: 12px;
+      padding: 11px 8px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+      min-height: 44px;
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    .btn-main {
+      background: #0284c7;
+      color: #fff;
+      box-shadow: 0 8px 18px rgba(2, 132, 199, 0.25);
+    }
+
+    .btn-alt {
+      background: #0f766e;
+      color: #fff;
+      box-shadow: 0 8px 18px rgba(15, 118, 110, 0.25);
+    }
+
+    .btn-soft {
+      background: #e8f0f7;
+      color: #12344f;
+    }
+
+    .traffic {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .light-box {
+      display: inline-flex;
+      gap: 8px;
+      padding: 8px;
+      border-radius: 999px;
+      background: #f1f5f9;
+      border: 1px solid #d7e4ef;
+    }
+
+    button.light-box {
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+
+    button.light-box:active {
+      transform: translateY(1px);
+    }
+
+    .light-state {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1f3d56;
+      min-width: 120px;
+    }
+
+    .lamp {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      opacity: 0.3;
+      border: 1px solid rgba(0, 0, 0, 0.15);
+    }
+
+    .lamp.red { background: #ef4444; }
+    .lamp.yellow { background: #f59e0b; }
+    .lamp.green { background: #22c55e; }
+    .lamp.on { opacity: 1; box-shadow: 0 0 10px rgba(0, 0, 0, 0.2); }
+
+    .flowchart {
+      margin-top: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .node {
+      border: 1px solid #d7e3ee;
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      background: #fbfdff;
+      font-size: clamp(13px, 3.5vw, 15px);
+      line-height: 1.25;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+      position: relative;
+    }
+
+    .node.terminal {
+      border-radius: 999px;
+      font-weight: 700;
+      text-align: center;
+      background: #f4fbf3;
+    }
+
+    .node.decision {
+      border-style: dashed;
+      background: #fff9ed;
+    }
+
+    .node.active {
+      border-color: var(--active);
+      background: var(--active-soft);
+      transform: scale(1.01);
+      box-shadow: 0 6px 20px rgba(14, 116, 144, 0.18);
+    }
+
+    .node.visited::after {
+      content: "✓";
+      position: absolute;
+      right: 10px;
+      top: 8px;
+      font-weight: 700;
+      color: #0f9d58;
+    }
+
+    .arrow {
+      text-align: center;
+      color: #5c6f84;
+      font-size: 18px;
+      line-height: 1;
+      user-select: none;
+    }
+
+    .branch {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .path {
+      border: 1px solid #d8e2ed;
+      border-radius: 12px;
+      padding: 8px;
+      background: #f8fbff;
+      font-size: 12px;
+      color: #44566b;
+      text-align: center;
+      font-weight: 700;
+    }
+
+    .path.active-yes {
+      border-color: #16a34a;
+      background: #effcf1;
+      color: #11632e;
+    }
+
+    .path.active-no {
+      border-color: #0284c7;
+      background: #eff8ff;
+      color: #0d4f7a;
+    }
+
+    .hint {
+      margin-top: 10px;
+      border: 1px solid #dce7f2;
+      border-radius: 12px;
+      background: #f7fbff;
+      padding: 10px;
+      color: #34475c;
+      font-size: clamp(13px, 3.5vw, 15px);
+    }
+
+    .foot {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #6a7a8f;
+      text-align: center;
+    }
+
+    @media (min-width: 780px) {
+      .status-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .controls {
+        grid-template-columns: 1fr auto;
+        align-items: end;
+      }
+
+      .flowchart {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <h1>Робот-курьер в городе</h1>
+      <p>Переключайте светофор и нажимайте шаги, чтобы видеть как робот едет по маршруту.</p>
+    </section>
+
+    <section class="panel">
+      <div class="status-grid">
+        <div class="status-box">
+          <div class="label">Текущее действие</div>
+          <div class="big" id="currentAction">Начало</div>
+          <div class="hint" id="hintText">Робот готовится к запуску.</div>
+        </div>
+
+        <div class="status-box">
+          <div class="label">Прогресс маршрута</div>
+          <div class="big" id="segmentText">Участок 0 из 6</div>
+          <div class="progress"><div id="progressBar" class="progress-bar"></div></div>
+          <div class="controls">
+            <div class="traffic">
+              <button id="lightBox" class="light-box" type="button" aria-label="Переключить сигнал светофора">
+                <span id="lampRed" class="lamp red"></span>
+                <span id="lampYellow" class="lamp yellow"></span>
+                <span id="lampGreen" class="lamp green"></span>
+              </button>
+              <div id="lightText" class="light-state">Свет: КРАСНЫЙ</div>
+            </div>
+            <div class="btn-row">
+              <button id="nextBtn" class="btn-main" type="button">Шаг</button>
+              <button id="autoBtn" class="btn-alt" type="button">Авто</button>
+              <button id="resetBtn" class="btn-soft" type="button">Сброс</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flowchart" id="flowchart">
+        <div class="node terminal" id="start">Начало</div>
+        <div class="arrow">↓</div>
+        <div class="node" id="route">Получить данные о маршруте</div>
+        <div class="arrow">↓</div>
+        <div class="node" id="location">Получить данные о текущем местоположении</div>
+        <div class="arrow">↓</div>
+        <div class="node" id="match">Сопоставить положение с маршрутом и выбрать следующий участок</div>
+        <div class="arrow">↓</div>
+        <div class="node decision" id="doneCheck">Маршрут завершен?</div>
+        <div class="branch">
+          <div id="doneYes" class="path">Да → Сообщить об окончании</div>
+          <div id="doneNo" class="path">Нет → Проверить светофор</div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="node" id="sensor">Получить данные с датчика (светофор)</div>
+        <div class="arrow">↓</div>
+        <div class="node decision" id="obstacleCheck">Есть красный или желтый сигнал?</div>
+        <div class="branch">
+          <div id="obstacleYes" class="path">Да → Остановиться и ждать</div>
+          <div id="obstacleNo" class="path">Нет → Переместиться по участку</div>
+        </div>
+        <div class="arrow">↓</div>
+        <div class="node" id="wait">Остановиться и ждать N секунд</div>
+        <div class="arrow">↓</div>
+        <div class="node" id="move">Переместиться по участку маршрута</div>
+        <div class="arrow">↓</div>
+        <div class="node" id="finishMsg">Сообщить об окончании маршрута</div>
+        <div class="arrow">↓</div>
+        <div class="node terminal" id="finish">Конец</div>
+      </div>
+
+      <div class="foot">Совет: в режиме «Авто» светофор меняется сам. Кнопкой «Свет» можно вручную показать другой сценарий.</div>
+    </section>
+  </main>
+
+  <script>
+    const totalSegments = 6;
+    let segment = 0;
+    let step = "start";
+    let light = "red";
+    let autoTimer = null;
+    let waitTicks = 0;
+    let doneDecision = null;
+    let obstacleDecision = null;
+
+    const nodeOrder = [
+      "start", "route", "location", "match", "doneCheck", "sensor",
+      "obstacleCheck", "wait", "move", "finishMsg", "finish"
+    ];
+
+    const nodeText = {
+      start: "Начало",
+      route: "Получить данные о маршруте",
+      location: "Получить данные о текущем местоположении",
+      match: "Сопоставить положение с маршрутом",
+      doneCheck: "Проверка завершения маршрута",
+      sensor: "Считать сигнал светофора",
+      obstacleCheck: "Проверка препятствия",
+      wait: "Остановка и ожидание",
+      move: "Движение по участку",
+      finishMsg: "Сообщение о завершении",
+      finish: "Конец"
+    };
+
+    const hints = {
+      start: "Робот включается и готовится к поездке.",
+      route: "Робот получает маршрут: куда и по каким участкам ехать.",
+      location: "Робот узнает, где находится сейчас.",
+      match: "Робот сравнивает свое положение с маршрутом и выбирает следующий участок.",
+      doneCheck: "Если все участки пройдены, маршрут завершается.",
+      sensor: "Робот смотрит на светофор у ближайшего перекрестка.",
+      obstacleCheck: "Красный/желтый: стоим. Зеленый: можно ехать.",
+      wait: "Остановились и ждем безопасный сигнал.",
+      move: "Робот едет вперед на один участок маршрута.",
+      finishMsg: "Робот сообщает: " + "\"" + "Маршрут выполнен" + "\"" + ".",
+      finish: "Поездка завершена."
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function setLight(nextLight) {
+      light = nextLight;
+      $("lampRed").classList.toggle("on", light === "red");
+      $("lampYellow").classList.toggle("on", light === "yellow");
+      $("lampGreen").classList.toggle("on", light === "green");
+      const text = light === "red" ? "КРАСНЫЙ" : light === "yellow" ? "ЖЕЛТЫЙ" : "ЗЕЛЕНЫЙ";
+      $("lightText").textContent = `Свет: ${text}`;
+    }
+
+    function cycleLight() {
+      if (light === "red") setLight("yellow");
+      else if (light === "yellow") setLight("green");
+      else setLight("red");
+    }
+
+    function markBranches() {
+      $("doneYes").classList.toggle("active-yes", doneDecision === "yes");
+      $("doneNo").classList.toggle("active-no", doneDecision === "no");
+      $("obstacleYes").classList.toggle("active-yes", obstacleDecision === "yes");
+      $("obstacleNo").classList.toggle("active-no", obstacleDecision === "no");
+    }
+
+    function render() {
+      nodeOrder.forEach((id) => {
+        const node = $(id);
+        node.classList.toggle("active", id === step);
+      });
+
+      const activeIndex = nodeOrder.indexOf(step);
+      nodeOrder.forEach((id, i) => {
+        $(id).classList.toggle("visited", i < activeIndex);
+      });
+
+      $("currentAction").textContent = nodeText[step];
+      $("hintText").textContent = hints[step];
+      $("segmentText").textContent = `Участок ${Math.min(segment, totalSegments)} из ${totalSegments}`;
+      $("progressBar").style.width = `${(Math.min(segment, totalSegments) / totalSegments) * 100}%`;
+      markBranches();
+
+      if (step === "finish") {
+        $("nextBtn").disabled = true;
+        $("nextBtn").style.opacity = "0.6";
+      } else {
+        $("nextBtn").disabled = false;
+        $("nextBtn").style.opacity = "1";
+      }
+    }
+
+    function nextStep() {
+      switch (step) {
+        case "start":
+          step = "route";
+          break;
+        case "route":
+          step = "location";
+          break;
+        case "location":
+          step = "match";
+          break;
+        case "match":
+          step = "doneCheck";
+          break;
+        case "doneCheck":
+          if (segment >= totalSegments) {
+            doneDecision = "yes";
+            step = "finishMsg";
+          } else {
+            doneDecision = "no";
+            step = "sensor";
+          }
+          break;
+        case "sensor":
+          step = "obstacleCheck";
+          break;
+        case "obstacleCheck":
+          if (light === "green") {
+            obstacleDecision = "no";
+            waitTicks = 0;
+            step = "move";
+          } else {
+            obstacleDecision = "yes";
+            waitTicks = 0;
+            step = "wait";
+          }
+          break;
+        case "wait":
+          // In auto mode we simulate a real traffic light cycle so the demo
+          // does not get stuck on red/yellow forever.
+          if (autoTimer) {
+            waitTicks += 1;
+            if (light === "red" && waitTicks >= 1) {
+              setLight("yellow");
+            } else if (light === "yellow" && waitTicks >= 2) {
+              setLight("green");
+            }
+          }
+          step = "sensor";
+          break;
+        case "move":
+          segment += 1;
+          waitTicks = 0;
+          step = "location";
+          break;
+        case "finishMsg":
+          step = "finish";
+          stopAuto();
+          break;
+        case "finish":
+          stopAuto();
+          break;
+        default:
+          step = "start";
+      }
+      render();
+    }
+
+    function toggleAuto() {
+      if (autoTimer) {
+        stopAuto();
+      } else {
+        autoTimer = setInterval(nextStep, 1200);
+        $("autoBtn").textContent = "Стоп";
+        $("autoBtn").className = "btn-main";
+      }
+    }
+
+    function stopAuto() {
+      if (autoTimer) {
+        clearInterval(autoTimer);
+        autoTimer = null;
+      }
+      $("autoBtn").textContent = "Авто";
+      $("autoBtn").className = "btn-alt";
+    }
+
+    function resetAll() {
+      stopAuto();
+      segment = 0;
+      step = "start";
+      waitTicks = 0;
+      doneDecision = null;
+      obstacleDecision = null;
+      setLight("red");
+      render();
+    }
+
+    $("nextBtn").addEventListener("click", nextStep);
+    $("autoBtn").addEventListener("click", toggleAuto);
+    $("resetBtn").addEventListener("click", resetAll);
+    $("lightBox").addEventListener("click", cycleLight);
+
+    setLight("red");
+    render();
+  </script>
+</body>
+</html>
+
