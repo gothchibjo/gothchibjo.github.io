@@ -16,6 +16,7 @@ const STORAGE_KEY = "followup_docs_v1";
 const TRASH_KEY = "followup_trash_v1";
 const DRAFT_KEY = "followup_draft_v1";
 const DELETE_CONFIRM_TIMEOUT_MS = 3000;
+const MEETING_TITLE_MAX_LENGTH = 160;
 const activeLocale = resolveLocale();
 const { t, applyToDocument, intlLocale } = createI18n(activeLocale);
 
@@ -25,6 +26,8 @@ const state = {
   pendingDeleteTimerId: null,
   pendingPurgeDocId: null,
   pendingPurgeTimerId: null,
+  pendingTaskRemoveBtn: null,
+  pendingTaskRemoveTimerId: null,
 };
 
 const els = {
@@ -49,6 +52,7 @@ const els = {
   exportMd: document.getElementById("exportMd"),
   exportDocx: document.getElementById("exportDocx"),
   exportPdf: document.getElementById("exportPdf"),
+  unsavedOpenDialog: document.getElementById("unsavedOpenDialog"),
   inputPanelTitle: document.getElementById("inputPanelTitle"),
   previewPanelTitle: document.getElementById("previewPanelTitle"),
 };
@@ -113,6 +117,7 @@ function normalizeTasks(tasks) {
       title: (task.title || "").trim(),
       owner: (task.owner || "").trim(),
       due: task.due || "",
+      completed: Boolean(task.completed),
     }))
     .filter((task) => Boolean(task.title));
 }
@@ -193,13 +198,14 @@ function rowTemplate(type, value = {}) {
     const wrap = document.createElement("div");
     wrap.className = "row-task";
     wrap.innerHTML = `
+      <input type="checkbox" data-field="completed" ${value.completed ? "checked" : ""} title="${t("row.taskDone")}" aria-label="${t("row.taskDone")}">
       <input type="text" data-field="title" placeholder="${t("row.taskTitle")}" value="${value.title || ""}">
       <input type="text" data-field="owner" placeholder="${t("row.taskOwner")}" value="${value.owner || ""}">
       <input type="date" data-field="due" value="${value.due || ""}">
       <button type="button" class="ghost icon-btn" data-add="tasks" title="${t("row.addTask")}" aria-label="${t("row.addTask")}">
         <span class="material-symbols-outlined" aria-hidden="true">add</span>
       </button>
-      <button type="button" class="ghost icon-btn" data-remove title="${t("row.removeTask")}" aria-label="${t("row.removeTask")}">
+      <button type="button" class="ghost icon-btn" data-remove-task title="${t("row.removeTask")}" aria-label="${t("row.removeTask")}">
         <span class="material-symbols-outlined" aria-hidden="true">delete</span>
       </button>
     `;
@@ -228,8 +234,9 @@ function collectRows(type) {
         const title = row.querySelector('[data-field="title"]').value.trim();
         const owner = row.querySelector('[data-field="owner"]').value.trim();
         const due = row.querySelector('[data-field="due"]').value;
+        const completed = row.querySelector('[data-field="completed"]').checked;
         if (!title) return null;
-        return { title, owner, due };
+        return { title, owner, due, completed };
       })
       .filter(Boolean);
   }
@@ -259,7 +266,7 @@ function collectForm() {
   return {
     id: state.currentId || uid(),
     meetingDate: els.meetingDate.value,
-    meetingTitle: els.meetingTitle.value.trim(),
+    meetingTitle: els.meetingTitle.value.trim().slice(0, MEETING_TITLE_MAX_LENGTH),
     meta: els.meta.value.trim(),
     participantsRaw: els.participantsInput.value,
     topicsRaw: els.topicsInput.value,
@@ -330,9 +337,10 @@ function generateText(doc) {
   lines.push(`4. ${t("protocol.tasks")}:`);
   if (doc.tasks.length === 0) lines.push(`4.1. ${t("common.empty")}`);
   doc.tasks.forEach((task, index) => {
+    const status = task.completed ? "[v]" : "[ ]";
     const owner = task.owner || t("common.unassigned");
     const due = formatDueDate(task.due);
-    lines.push(`4.${index + 1}. ${task.title} — ${owner}, ${due}`);
+    lines.push(`4.${index + 1}. ${status} ${task.title} — ${owner}, ${due}`);
   });
   lines.push("");
   lines.push(t("protocol.footer"));
@@ -374,6 +382,7 @@ function renderTaskReports() {
   allDocs.forEach((doc) => {
     (doc.tasks || []).forEach((task) => {
       if (!task.title) return;
+      if (task.completed) return;
       allTasks.push({
         ...task,
         meetingTitle: doc.meetingTitle || t("common.untitled"),
@@ -456,6 +465,7 @@ function getLastMeta() {
 }
 
 function resetForm() {
+  clearPendingTaskRemove();
   state.currentId = null;
   els.meetingDate.value = getTodayIsoLocal();
   els.meetingTitle.value = "";
@@ -473,6 +483,7 @@ function resetForm() {
 }
 
 function fillForm(doc) {
+  clearPendingTaskRemove();
   state.currentId = doc.id;
   els.meetingDate.value = doc.meetingDate || "";
   els.meetingTitle.value = doc.meetingTitle || "";
@@ -495,7 +506,7 @@ function saveDoc() {
   const doc = collectForm();
   if (!doc.meetingDate || !doc.meetingTitle) {
     alert(t("alerts.fillDateAndTitle"));
-    return;
+    return false;
   }
 
   const docs = getDocs();
@@ -515,20 +526,21 @@ function saveDoc() {
   setDocs(docs);
   updatePreview();
   renderStoredDocs();
+  return true;
 }
 
 function updateCurrentDoc() {
   const doc = collectForm();
   if (!doc.meetingDate || !doc.meetingTitle) {
     alert(t("alerts.fillDateAndTitle"));
-    return;
+    return false;
   }
 
   const docs = getDocs();
   const index = docs.findIndex((d) => d.id === doc.id);
   if (index < 0) {
     alert(t("alerts.currentNotFound"));
-    return;
+    return false;
   }
 
   docs[index] = { ...doc, updatedAt: new Date().toISOString() };
@@ -537,6 +549,7 @@ function updateCurrentDoc() {
   setDocs(docs);
   updatePreview();
   renderStoredDocs();
+  return true;
 }
 
 function clearForm() {
@@ -545,6 +558,40 @@ function clearForm() {
     if (!ok) return;
   }
   resetForm();
+}
+
+function resetTaskRemoveButton(btn) {
+  if (!btn) return;
+  btn.classList.remove("icon-btn-danger");
+  btn.title = t("row.removeTask");
+  btn.setAttribute("aria-label", t("row.removeTask"));
+  const icon = btn.querySelector(".material-symbols-outlined");
+  if (icon) icon.textContent = "delete";
+}
+
+function clearPendingTaskRemove(options = {}) {
+  const { resetButton = true } = options;
+  if (state.pendingTaskRemoveTimerId !== null) {
+    window.clearTimeout(state.pendingTaskRemoveTimerId);
+    state.pendingTaskRemoveTimerId = null;
+  }
+  if (!state.pendingTaskRemoveBtn) return;
+  if (resetButton && state.pendingTaskRemoveBtn.isConnected) resetTaskRemoveButton(state.pendingTaskRemoveBtn);
+  state.pendingTaskRemoveBtn = null;
+}
+
+function armPendingTaskRemove(btn) {
+  clearPendingTaskRemove();
+  state.pendingTaskRemoveBtn = btn;
+  btn.classList.add("icon-btn-danger");
+  btn.title = t("row.removeTaskConfirm");
+  btn.setAttribute("aria-label", t("row.removeTaskConfirm"));
+  const icon = btn.querySelector(".material-symbols-outlined");
+  if (icon) icon.textContent = "error";
+  state.pendingTaskRemoveTimerId = window.setTimeout(() => {
+    if (state.pendingTaskRemoveBtn !== btn) return;
+    clearPendingTaskRemove();
+  }, DELETE_CONFIRM_TIMEOUT_MS);
 }
 
 function clearPendingDelete(options = {}) {
@@ -605,6 +652,7 @@ function renderStoredDocs() {
   docs.forEach((doc) => {
     const li = document.createElement("li");
     li.className = "stored-doc-row";
+    li.dataset.docId = doc.id;
     const meta = new Date(doc.updatedAt).toLocaleString(intlLocale);
     const isDeletePending = state.pendingDeleteDocId === doc.id;
     const deleteBtnClass = isDeletePending ? "ghost icon-btn icon-btn-danger" : "ghost icon-btn";
@@ -616,15 +664,6 @@ function renderStoredDocs() {
         <div class="doc-meta">${meta}</div>
       </div>
       <div class="stored-actions">
-        <button
-          type="button"
-          class="ghost icon-btn"
-          data-open-doc="${doc.id}"
-          title="${t("stored.unloadDoc")}"
-          aria-label="${t("stored.unloadDoc")}"
-        >
-          <span class="material-symbols-outlined" aria-hidden="true">file_open</span>
-        </button>
         <button
           type="button"
           class="ghost icon-btn"
@@ -717,6 +756,49 @@ function openStoredDoc(docId) {
   if (!doc) return;
   fillForm(doc);
   window.location.hash = `#/doc/${doc.id}`;
+}
+
+function requestUnsavedOpenAction() {
+  const dialog = els.unsavedOpenDialog;
+  if (!dialog || typeof dialog.showModal !== "function") {
+    const ok = window.confirm(t("alerts.unsavedReset"));
+    return Promise.resolve(ok ? "discard" : "cancel");
+  }
+  if (dialog.open) dialog.close("cancel");
+  return new Promise((resolve) => {
+    const onClose = () => {
+      const choice = dialog.returnValue || "cancel";
+      resolve(choice);
+    };
+    dialog.addEventListener("close", onClose, { once: true });
+    dialog.showModal();
+  });
+}
+
+async function openStoredDocWithGuard(docId) {
+  if (state.currentId === docId) return;
+  if (!shouldConfirmReset()) {
+    openStoredDoc(docId);
+    return;
+  }
+
+  const choice = await requestUnsavedOpenAction();
+  if (choice === "cancel") return;
+  if (choice === "discard") {
+    openStoredDoc(docId);
+    return;
+  }
+  if (choice === "save_as_new") {
+    const saved = saveDoc();
+    if (saved) openStoredDoc(docId);
+    return;
+  }
+  if (choice === "save_current") {
+    const draft = collectForm();
+    const isStored = Boolean(findSavedDocById(draft.id));
+    const saved = isStored ? updateCurrentDoc() : saveDoc();
+    if (saved) openStoredDoc(docId);
+  }
 }
 
 async function exportDocx() {
@@ -871,9 +953,18 @@ document.addEventListener("click", (e) => {
     return;
   }
 
-  const openStored = e.target.closest("[data-open-doc]");
-  if (openStored) {
-    openStoredDoc(openStored.dataset.openDoc);
+  const removeTask = e.target.closest("[data-remove-task]");
+  if (removeTask) {
+    if (state.pendingTaskRemoveBtn === removeTask) {
+      clearPendingTaskRemove({ resetButton: false });
+      const parent = removeTask.parentElement;
+      const root = parent.parentElement;
+      parent.remove();
+      if (!root.children.length) addRow(root.id);
+      updatePreview();
+      return;
+    }
+    armPendingTaskRemove(removeTask);
     return;
   }
 
@@ -898,6 +989,12 @@ document.addEventListener("click", (e) => {
   const purgeTrash = e.target.closest("[data-purge-doc]");
   if (purgeTrash) {
     purgeTrashDoc(purgeTrash.dataset.purgeDoc);
+    return;
+  }
+
+  const storedRow = e.target.closest(".stored-doc-row");
+  if (storedRow && storedRow.dataset.docId) {
+    openStoredDocWithGuard(storedRow.dataset.docId);
   }
 });
 
