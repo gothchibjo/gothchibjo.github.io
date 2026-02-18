@@ -9,12 +9,22 @@ import {
   normalizeTopic,
   renderTopicsModelToInput,
 } from "./topics-input.js";
+import { createI18n, resolveLocale } from "./i18n/index.js";
+import { getRandomHeaderPair } from "./i18n/header-pairs/index.js";
 
 const STORAGE_KEY = "followup_docs_v1";
+const TRASH_KEY = "followup_trash_v1";
 const DRAFT_KEY = "followup_draft_v1";
+const DELETE_CONFIRM_TIMEOUT_MS = 3000;
+const activeLocale = resolveLocale();
+const { t, applyToDocument, intlLocale } = createI18n(activeLocale);
 
 const state = {
   currentId: null,
+  pendingDeleteDocId: null,
+  pendingDeleteTimerId: null,
+  pendingPurgeDocId: null,
+  pendingPurgeTimerId: null,
 };
 
 const els = {
@@ -27,6 +37,7 @@ const els = {
   tasks: document.getElementById("tasks"),
   preview: document.getElementById("preview"),
   storedDocs: document.getElementById("storedDocs"),
+  trashDocs: document.getElementById("trashDocs"),
   deadlineReport: document.getElementById("deadlineReport"),
   ownerReport: document.getElementById("ownerReport"),
   saveBtn: document.getElementById("saveBtn"),
@@ -38,7 +49,15 @@ const els = {
   exportMd: document.getElementById("exportMd"),
   exportDocx: document.getElementById("exportDocx"),
   exportPdf: document.getElementById("exportPdf"),
+  inputPanelTitle: document.getElementById("inputPanelTitle"),
+  previewPanelTitle: document.getElementById("previewPanelTitle"),
 };
+
+function applyRandomHeaderPair() {
+  const [leftTitle, rightTitle] = getRandomHeaderPair(activeLocale);
+  if (els.inputPanelTitle) els.inputPanelTitle.textContent = leftTitle;
+  if (els.previewPanelTitle) els.previewPanelTitle.textContent = rightTitle;
+}
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
@@ -54,6 +73,18 @@ function getDocs() {
 
 function setDocs(docs) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
+}
+
+function getTrashDocs() {
+  try {
+    return JSON.parse(localStorage.getItem(TRASH_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function setTrashDocs(docs) {
+  localStorage.setItem(TRASH_KEY, JSON.stringify(docs));
 }
 
 function getDraft() {
@@ -116,20 +147,26 @@ function updateSaveUi(doc) {
   const changedStored = isStored && hasUnsavedChangesVsStored(doc);
 
   if (changedStored) {
-    els.saveBtn.textContent = "Сохранить как новый";
+    const saveAsNew = t("actions.saveAsNew");
+    els.saveBtn.textContent = saveAsNew;
+    els.saveBtn.title = saveAsNew;
+    els.saveBtn.setAttribute("aria-label", saveAsNew);
     els.updateBtn.hidden = false;
-    els.saveHint.textContent = "Изменения сохранятся как новый документ. Исходный останется без изменений.";
+    els.saveHint.textContent = t("actions.saveHintChangedStored");
     return;
   }
 
-  els.saveBtn.textContent = "Сохранить";
+  const save = t("actions.save");
+  els.saveBtn.textContent = save;
+  els.saveBtn.title = save;
+  els.saveBtn.setAttribute("aria-label", save);
   els.updateBtn.hidden = true;
   if (isStored) {
-    els.saveHint.textContent = "Редактируется сохраненный документ.";
+    els.saveHint.textContent = t("actions.saveHintStored");
     return;
   }
 
-  els.saveHint.textContent = "Новый документ (черновик).";
+  els.saveHint.textContent = t("actions.saveHintDraft");
 }
 
 function hasLocalEditsInDraft(doc) {
@@ -156,20 +193,14 @@ function rowTemplate(type, value = {}) {
     const wrap = document.createElement("div");
     wrap.className = "row-task";
     wrap.innerHTML = `
-      <input type="text" data-field="title" placeholder="Что сделать" value="${value.title || ""}">
-      <input type="text" data-field="owner" placeholder="@Ответственный" value="${value.owner || ""}">
+      <input type="text" data-field="title" placeholder="${t("row.taskTitle")}" value="${value.title || ""}">
+      <input type="text" data-field="owner" placeholder="${t("row.taskOwner")}" value="${value.owner || ""}">
       <input type="date" data-field="due" value="${value.due || ""}">
-      <button type="button" class="ghost icon-btn" data-add="tasks" title="Добавить задачу" aria-label="Добавить задачу">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M19 11H13V5h-2v6H5v2h6v6h2v-6h6z" />
-        </svg>
+      <button type="button" class="ghost icon-btn" data-add="tasks" title="${t("row.addTask")}" aria-label="${t("row.addTask")}">
+        <span class="material-symbols-outlined" aria-hidden="true">add</span>
       </button>
-      <button type="button" class="ghost icon-btn" data-remove title="Удалить задачу" aria-label="Удалить задачу">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M6 7h12l-1 14H7L6 7Zm3-4h6l1 2h4v2H4V5h4l1-2Z"
-          />
-        </svg>
+      <button type="button" class="ghost icon-btn" data-remove title="${t("row.removeTask")}" aria-label="${t("row.removeTask")}">
+        <span class="material-symbols-outlined" aria-hidden="true">delete</span>
       </button>
     `;
     return wrap;
@@ -178,8 +209,8 @@ function rowTemplate(type, value = {}) {
   const wrap = document.createElement("div");
   wrap.className = "row";
   wrap.innerHTML = `
-    <input type="text" data-field="text" placeholder="Введите значение" value="${value.text || ""}">
-    <button type="button" class="ghost" data-remove>Удалить</button>
+    <input type="text" data-field="text" placeholder="${t("row.value")}" value="${value.text || ""}">
+    <button type="button" class="ghost" data-remove>${t("common.remove")}</button>
   `;
   return wrap;
 }
@@ -243,10 +274,10 @@ function collectForm() {
 
 function generateText(doc) {
   const formatDueDate = (due) => {
-    if (!due) return "без срока";
+    if (!due) return t("common.noDue");
     const parsed = new Date(`${due}T00:00:00`);
     if (Number.isNaN(parsed.getTime())) return due;
-    return parsed.toLocaleDateString(undefined, { dateStyle: "medium" });
+    return parsed.toLocaleDateString(intlLocale, { dateStyle: "medium" });
   };
 
   const formatListItem = (text, isLast) => {
@@ -263,20 +294,20 @@ function generateText(doc) {
   };
 
   const lines = [];
-  lines.push(`${doc.meetingDate || "YYYY-MM-DD"} ${doc.meetingTitle || "Без названия"}`);
+  lines.push(`${doc.meetingDate || "YYYY-MM-DD"} ${doc.meetingTitle || t("common.untitled")}`);
   if (doc.meta) lines.push(doc.meta);
   lines.push("");
 
-  lines.push("1. Были:");
-  if (doc.participants.length === 0) lines.push("- (не заполнено)");
+  lines.push(`1. ${t("protocol.participants")}:`);
+  if (doc.participants.length === 0) lines.push(`- ${t("common.empty")}`);
   doc.participants.forEach((item, index) => {
     const rendered = formatListItem(item.text, index === doc.participants.length - 1);
     if (rendered) lines.push(`- ${rendered}`);
   });
   lines.push("");
 
-  lines.push("2. Обсудили:");
-  if (doc.topics.length === 0) lines.push("2.1. (не заполнено)");
+  lines.push(`2. ${t("protocol.topics")}:`);
+  if (doc.topics.length === 0) lines.push(`2.1. ${t("common.empty")}`);
   doc.topics.forEach((item, index) => {
     const topic = normalizeTopic(item.text);
     const title = topic.main.replace(/[.:;]+\s*$/, "").trim();
@@ -288,34 +319,36 @@ function generateText(doc) {
   });
   lines.push("");
 
-  lines.push("3. Решили:");
-  if (doc.decisions.length === 0) lines.push("3.1. (не заполнено)");
+  lines.push(`3. ${t("protocol.decisions")}:`);
+  if (doc.decisions.length === 0) lines.push(`3.1. ${t("common.empty")}`);
   doc.decisions.forEach((item, index) => {
     const rendered = formatDecision(item.text);
     if (rendered) lines.push(`3.${index + 1}. ${rendered}`);
   });
   lines.push("");
 
-  lines.push("4. Поставили задачи:");
-  if (doc.tasks.length === 0) lines.push("4.1. (не заполнено)");
+  lines.push(`4. ${t("protocol.tasks")}:`);
+  if (doc.tasks.length === 0) lines.push(`4.1. ${t("common.empty")}`);
   doc.tasks.forEach((task, index) => {
-    const owner = task.owner || "@не назначен";
+    const owner = task.owner || t("common.unassigned");
     const due = formatDueDate(task.due);
     lines.push(`4.${index + 1}. ${task.title} — ${owner}, ${due}`);
   });
+  lines.push("");
+  lines.push(t("protocol.footer"));
 
   return lines.join("\n");
 }
 
 function formatDate(date) {
-  return new Date(date).toLocaleDateString("ru-RU");
+  return new Date(date).toLocaleDateString(intlLocale);
 }
 
 function renderReportList(target, items) {
   target.innerHTML = "";
   if (items.length === 0) {
     const li = document.createElement("li");
-    li.textContent = "Нет данных";
+    li.textContent = t("common.noData");
     target.appendChild(li);
     return;
   }
@@ -343,7 +376,7 @@ function renderTaskReports() {
       if (!task.title) return;
       allTasks.push({
         ...task,
-        meetingTitle: doc.meetingTitle || "Без названия",
+        meetingTitle: doc.meetingTitle || t("common.untitled"),
         meetingDate: doc.meetingDate || "",
       });
     });
@@ -373,7 +406,7 @@ function renderTaskReports() {
   });
 
   const byOwnerMap = allTasks.reduce((acc, task) => {
-    const owner = task.owner || "@не назначен";
+    const owner = task.owner || t("common.unassigned");
     acc.set(owner, (acc.get(owner) || 0) + 1);
     return acc;
   }, new Map());
@@ -386,13 +419,13 @@ function renderTaskReports() {
     .filter((task) => Boolean(task.due))
     .sort((a, b) => a.due.localeCompare(b.due))
     .slice(0, 3)
-    .map((task) => `${formatDate(task.due)} - ${task.title} (${task.owner || "@не назначен"})`);
+    .map((task) => `${formatDate(task.due)} - ${task.title} (${task.owner || t("common.unassigned")})`);
 
   renderReportList(els.deadlineReport, [
-    `Всего задач: ${allTasks.length}`,
-    `Просрочено: ${overdue}`,
-    `На 7 дней: ${week}`,
-    `Без срока: ${noDate}`,
+    t("reports.totalTasks", { count: allTasks.length }),
+    t("reports.overdue", { count: overdue }),
+    t("reports.next7Days", { count: week }),
+    t("reports.noDue", { count: noDate }),
     ...nearestTasks,
   ]);
 
@@ -461,7 +494,7 @@ function fillForm(doc) {
 function saveDoc() {
   const doc = collectForm();
   if (!doc.meetingDate || !doc.meetingTitle) {
-    alert("Заполните дату и заголовок");
+    alert(t("alerts.fillDateAndTitle"));
     return;
   }
 
@@ -487,14 +520,14 @@ function saveDoc() {
 function updateCurrentDoc() {
   const doc = collectForm();
   if (!doc.meetingDate || !doc.meetingTitle) {
-    alert("Заполните дату и заголовок");
+    alert(t("alerts.fillDateAndTitle"));
     return;
   }
 
   const docs = getDocs();
   const index = docs.findIndex((d) => d.id === doc.id);
   if (index < 0) {
-    alert("Текущий документ не найден. Используйте 'Сохранить'.");
+    alert(t("alerts.currentNotFound"));
     return;
   }
 
@@ -508,43 +541,159 @@ function updateCurrentDoc() {
 
 function clearForm() {
   if (shouldConfirmReset()) {
-    const ok = window.confirm("Есть несохраненные изменения. Очистить форму?");
+    const ok = window.confirm(t("alerts.unsavedReset"));
     if (!ok) return;
   }
   resetForm();
 }
 
+function clearPendingDelete(options = {}) {
+  const { rerender = true } = options;
+  if (state.pendingDeleteTimerId !== null) {
+    window.clearTimeout(state.pendingDeleteTimerId);
+    state.pendingDeleteTimerId = null;
+  }
+  if (state.pendingDeleteDocId === null) return;
+  state.pendingDeleteDocId = null;
+  if (rerender) renderStoredDocs();
+}
+
+function armPendingDelete(docId) {
+  if (!findSavedDocById(docId)) return;
+  clearPendingDelete({ rerender: false });
+  state.pendingDeleteDocId = docId;
+  state.pendingDeleteTimerId = window.setTimeout(() => {
+    state.pendingDeleteTimerId = null;
+    if (state.pendingDeleteDocId !== docId) return;
+    state.pendingDeleteDocId = null;
+    renderStoredDocs();
+  }, DELETE_CONFIRM_TIMEOUT_MS);
+  renderStoredDocs();
+}
+
+function clearPendingPurge(options = {}) {
+  const { rerender = true } = options;
+  if (state.pendingPurgeTimerId !== null) {
+    window.clearTimeout(state.pendingPurgeTimerId);
+    state.pendingPurgeTimerId = null;
+  }
+  if (state.pendingPurgeDocId === null) return;
+  state.pendingPurgeDocId = null;
+  if (rerender) renderTrashDocs();
+}
+
+function armPendingPurge(docId) {
+  if (!getTrashDocs().some((doc) => doc.id === docId)) return;
+  clearPendingPurge({ rerender: false });
+  state.pendingPurgeDocId = docId;
+  state.pendingPurgeTimerId = window.setTimeout(() => {
+    state.pendingPurgeTimerId = null;
+    if (state.pendingPurgeDocId !== docId) return;
+    state.pendingPurgeDocId = null;
+    renderTrashDocs();
+  }, DELETE_CONFIRM_TIMEOUT_MS);
+  renderTrashDocs();
+}
+
 function renderStoredDocs() {
   const docs = getDocs();
+  if (state.pendingDeleteDocId && !docs.some((doc) => doc.id === state.pendingDeleteDocId)) {
+    clearPendingDelete({ rerender: false });
+  }
   els.storedDocs.innerHTML = "";
 
   docs.forEach((doc) => {
     const li = document.createElement("li");
     li.className = "stored-doc-row";
-    li.dataset.open = doc.id;
-    const meta = new Date(doc.updatedAt).toLocaleString("ru-RU");
+    const meta = new Date(doc.updatedAt).toLocaleString(intlLocale);
+    const isDeletePending = state.pendingDeleteDocId === doc.id;
+    const deleteBtnClass = isDeletePending ? "ghost icon-btn icon-btn-danger" : "ghost icon-btn";
+    const deleteIcon = isDeletePending ? "error" : "delete";
+    const deleteLabel = isDeletePending ? t("stored.deleteDocConfirm") : t("stored.deleteDoc");
     li.innerHTML = `
       <div>
-        <div><strong>${doc.meetingDate || ""}</strong> ${doc.meetingTitle || "Без названия"}</div>
+        <div><strong>${doc.meetingDate || ""}</strong> ${doc.meetingTitle || t("common.untitled")}</div>
         <div class="doc-meta">${meta}</div>
       </div>
-      <div>
+      <div class="stored-actions">
         <button
           type="button"
-          class="ghost icon-btn stored-open-btn"
-          data-open="${doc.id}"
-          title="Загрузить документ"
-          aria-label="Загрузить документ"
+          class="ghost icon-btn"
+          data-open-doc="${doc.id}"
+          title="${t("stored.unloadDoc")}"
+          aria-label="${t("stored.unloadDoc")}"
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M5 20h14v-2H5v2Zm7-18v10.17l3.59-3.58L17 10l-5 5-5-5 1.41-1.41L11 12.17V2h1Z"
-            />
-          </svg>
+          <span class="material-symbols-outlined" aria-hidden="true">file_open</span>
+        </button>
+        <button
+          type="button"
+          class="ghost icon-btn"
+          data-copy-doc-link="${doc.id}"
+          title="${t("stored.copyDocLink")}"
+          aria-label="${t("stored.copyDocLink")}"
+        >
+          <span class="material-symbols-outlined" aria-hidden="true">link</span>
+        </button>
+        <button
+          type="button"
+          class="${deleteBtnClass}"
+          data-delete-doc="${doc.id}"
+          title="${deleteLabel}"
+          aria-label="${deleteLabel}"
+        >
+          <span class="material-symbols-outlined" aria-hidden="true">${deleteIcon}</span>
         </button>
       </div>
     `;
     els.storedDocs.appendChild(li);
+  });
+}
+
+function renderTrashDocs() {
+  const docs = getTrashDocs();
+  if (state.pendingPurgeDocId && !docs.some((doc) => doc.id === state.pendingPurgeDocId)) {
+    clearPendingPurge({ rerender: false });
+  }
+  els.trashDocs.innerHTML = "";
+  if (!docs.length) return;
+
+  docs.forEach((doc) => {
+    const li = document.createElement("li");
+    li.className = "trash-doc-row";
+    const meta = doc.deletedAt
+      ? `${t("stored.deletedAt")}: ${new Date(doc.deletedAt).toLocaleString(intlLocale)}`
+      : "";
+    const isPurgePending = state.pendingPurgeDocId === doc.id;
+    const purgeBtnClass = isPurgePending ? "ghost icon-btn icon-btn-danger" : "ghost icon-btn";
+    const purgeIcon = isPurgePending ? "error" : "delete_forever";
+    const purgeLabel = isPurgePending ? t("stored.deleteForeverConfirm") : t("stored.deleteForeverDoc");
+    li.innerHTML = `
+      <div>
+        <div><strong>${doc.meetingDate || ""}</strong> ${doc.meetingTitle || t("common.untitled")}</div>
+        <div class="doc-meta">${meta}</div>
+      </div>
+      <div class="stored-actions">
+        <button
+          type="button"
+          class="ghost icon-btn"
+          data-restore-doc="${doc.id}"
+          title="${t("stored.restoreDoc")}"
+          aria-label="${t("stored.restoreDoc")}"
+        >
+          <span class="material-symbols-outlined" aria-hidden="true">restore_from_trash</span>
+        </button>
+        <button
+          type="button"
+          class="${purgeBtnClass}"
+          data-purge-doc="${doc.id}"
+          title="${purgeLabel}"
+          aria-label="${purgeLabel}"
+        >
+          <span class="material-symbols-outlined" aria-hidden="true">${purgeIcon}</span>
+        </button>
+      </div>
+    `;
+    els.trashDocs.appendChild(li);
   });
 }
 
@@ -560,7 +709,14 @@ function downloadBlob(blob, filename) {
 function exportMd() {
   const doc = collectForm();
   const blob = new Blob([generateText(doc)], { type: "text/markdown;charset=utf-8" });
-  downloadBlob(blob, `${doc.meetingDate || "followup"}-${doc.id}.md`);
+  downloadBlob(blob, `${doc.meetingDate || t("common.fileBase")}-${doc.id}.md`);
+}
+
+function openStoredDoc(docId) {
+  const doc = findSavedDocById(docId);
+  if (!doc) return;
+  fillForm(doc);
+  window.location.hash = `#/doc/${doc.id}`;
 }
 
 async function exportDocx() {
@@ -569,7 +725,7 @@ async function exportDocx() {
   const paragraphs = generateText(doc).split("\n").map((line) => new Paragraph({ children: [new TextRun(line)] }));
   const file = new Document({ sections: [{ properties: {}, children: paragraphs }] });
   const blob = await Packer.toBlob(file);
-  downloadBlob(blob, `${doc.meetingDate || "followup"}-${doc.id}.docx`);
+  downloadBlob(blob, `${doc.meetingDate || t("common.fileBase")}-${doc.id}.docx`);
 }
 
 function exportPdf() {
@@ -577,7 +733,7 @@ function exportPdf() {
   const text = generateText(doc);
   const jsPdf = window.jspdf?.jsPDF;
   if (!jsPdf) {
-    alert("PDF библиотека не загружена");
+    alert(t("alerts.pdfMissing"));
     return;
   }
 
@@ -586,7 +742,7 @@ function exportPdf() {
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(11);
   pdf.text(lines, 36, 48);
-  pdf.save(`${doc.meetingDate || "followup"}-${doc.id}.pdf`);
+  pdf.save(`${doc.meetingDate || t("common.fileBase")}-${doc.id}.pdf`);
 }
 
 function syncUrlWithDoc(docId) {
@@ -596,8 +752,68 @@ function syncUrlWithDoc(docId) {
   window.history.replaceState(null, "", `${window.location.pathname}${nextHash}`);
 }
 
+function getDocUrl(docId) {
+  const url = new URL(window.location.href);
+  url.hash = `#/doc/${docId}`;
+  return url.toString();
+}
+
 function copyDocLink() {
-  navigator.clipboard.writeText(window.location.href);
+  const doc = collectForm();
+  navigator.clipboard.writeText(getDocUrl(doc.id));
+}
+
+function copyStoredDocLink(docId) {
+  if (!docId) return;
+  navigator.clipboard.writeText(getDocUrl(docId));
+}
+
+function deleteStoredDoc(docId) {
+  if (state.pendingDeleteDocId !== docId) {
+    armPendingDelete(docId);
+    return;
+  }
+  clearPendingDelete({ rerender: false });
+  const docs = getDocs();
+  const index = docs.findIndex((doc) => doc.id === docId);
+  if (index < 0) return;
+  const doc = docs[index];
+  const nextDocs = docs.filter((item) => item.id !== docId);
+  const trashDocs = getTrashDocs().filter((item) => item.id !== docId);
+  trashDocs.unshift({ ...doc, deletedAt: new Date().toISOString() });
+  setDocs(nextDocs);
+  setTrashDocs(trashDocs);
+  if (state.currentId === docId) resetForm();
+  renderStoredDocs();
+  renderTrashDocs();
+  renderTaskReports();
+}
+
+function restoreTrashDoc(docId) {
+  const trashDocs = getTrashDocs();
+  const index = trashDocs.findIndex((doc) => doc.id === docId);
+  if (index < 0) return;
+  const { deletedAt: _deletedAt, ...restored } = trashDocs[index];
+  const docs = getDocs().filter((doc) => doc.id !== docId);
+  docs.unshift(restored);
+  setDocs(docs);
+  setTrashDocs(trashDocs.filter((doc) => doc.id !== docId));
+  renderStoredDocs();
+  renderTrashDocs();
+  renderTaskReports();
+}
+
+function purgeTrashDoc(docId) {
+  if (state.pendingPurgeDocId !== docId) {
+    armPendingPurge(docId);
+    return;
+  }
+  clearPendingPurge({ rerender: false });
+  const trashDocs = getTrashDocs();
+  const next = trashDocs.filter((doc) => doc.id !== docId);
+  if (next.length === trashDocs.length) return;
+  setTrashDocs(next);
+  renderTrashDocs();
 }
 
 function copyProtocolToClipboard() {
@@ -623,6 +839,20 @@ function restoreDraftIfAny() {
   return true;
 }
 
+function handleSaveShortcut(event) {
+  const isSaveKey = event.code === "KeyS";
+  const isModifierPressed = event.ctrlKey || event.metaKey;
+  if (!isSaveKey || !isModifierPressed) return;
+  event.preventDefault();
+  const doc = collectForm();
+  const isStored = Boolean(findSavedDocById(doc.id));
+  if (isStored) {
+    updateCurrentDoc();
+    return;
+  }
+  saveDoc();
+}
+
 document.addEventListener("click", (e) => {
   const add = e.target.closest("[data-add]");
   if (add) {
@@ -641,14 +871,37 @@ document.addEventListener("click", (e) => {
     return;
   }
 
-  const open = e.target.closest("[data-open]");
-  if (open) {
-    const doc = getDocs().find((d) => d.id === open.dataset.open);
-    if (!doc) return;
-    fillForm(doc);
-    window.location.hash = `#/doc/${doc.id}`;
+  const openStored = e.target.closest("[data-open-doc]");
+  if (openStored) {
+    openStoredDoc(openStored.dataset.openDoc);
+    return;
+  }
+
+  const deleteStored = e.target.closest("[data-delete-doc]");
+  if (deleteStored) {
+    deleteStoredDoc(deleteStored.dataset.deleteDoc);
+    return;
+  }
+
+  const copyStored = e.target.closest("[data-copy-doc-link]");
+  if (copyStored) {
+    copyStoredDocLink(copyStored.dataset.copyDocLink);
+    return;
+  }
+
+  const restoreTrash = e.target.closest("[data-restore-doc]");
+  if (restoreTrash) {
+    restoreTrashDoc(restoreTrash.dataset.restoreDoc);
+    return;
+  }
+
+  const purgeTrash = e.target.closest("[data-purge-doc]");
+  if (purgeTrash) {
+    purgeTrashDoc(purgeTrash.dataset.purgeDoc);
   }
 });
+
+document.addEventListener("keydown", handleSaveShortcut, { capture: true });
 
 bindParticipantsInput({
   textarea: els.participantsInput,
@@ -657,6 +910,9 @@ bindParticipantsInput({
 bindTopicsInput({
   textarea: els.topicsInput,
 });
+
+applyToDocument(document);
+applyRandomHeaderPair();
 
 ["input", "change"].forEach((eventName) => {
   document.addEventListener(eventName, () => updatePreview());
@@ -668,11 +924,12 @@ els.newBtn.addEventListener("click", clearForm);
 els.copyDocLink.addEventListener("click", copyDocLink);
 els.copyProtocol.addEventListener("click", copyProtocolToClipboard);
 els.exportMd.addEventListener("click", exportMd);
-els.exportDocx.addEventListener("click", () => exportDocx().catch(() => alert("Ошибка экспорта DOCX")));
+els.exportDocx.addEventListener("click", () => exportDocx().catch(() => alert(t("alerts.exportDocxError"))));
 els.exportPdf.addEventListener("click", exportPdf);
 
 if (!openByHash()) {
   if (!restoreDraftIfAny()) resetForm();
 }
 renderStoredDocs();
+renderTrashDocs();
 renderTaskReports();
