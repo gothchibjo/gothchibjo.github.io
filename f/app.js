@@ -17,8 +17,13 @@ const TRASH_KEY = "followup_trash_v1";
 const DRAFT_KEY = "followup_draft_v1";
 const DELETE_CONFIRM_TIMEOUT_MS = 3000;
 const MEETING_TITLE_MAX_LENGTH = 160;
+const COPY_FEEDBACK_MS = 1200;
+const ACTION_FEEDBACK_MS = 900;
 const activeLocale = resolveLocale();
 const { t, applyToDocument, intlLocale } = createI18n(activeLocale);
+const copyFeedbackTimers = new WeakMap();
+const copyFeedbackInitialState = new WeakMap();
+const actionFeedbackTimers = new WeakMap();
 
 const state = {
   currentId: null,
@@ -44,7 +49,7 @@ const els = {
   deadlineReport: document.getElementById("deadlineReport"),
   ownerReport: document.getElementById("ownerReport"),
   saveBtn: document.getElementById("saveBtn"),
-  updateBtn: document.getElementById("updateBtn"),
+  saveAsNewBtn: document.getElementById("saveAsNewBtn"),
   newBtn: document.getElementById("newBtn"),
   saveHint: document.getElementById("saveHint"),
   copyDocLink: document.getElementById("copyDocLink"),
@@ -150,23 +155,24 @@ function hasUnsavedChangesVsStored(doc) {
 function updateSaveUi(doc) {
   const isStored = Boolean(findSavedDocById(doc.id));
   const changedStored = isStored && hasUnsavedChangesVsStored(doc);
-
-  if (changedStored) {
-    const saveAsNew = t("actions.saveAsNew");
-    els.saveBtn.textContent = saveAsNew;
-    els.saveBtn.title = saveAsNew;
-    els.saveBtn.setAttribute("aria-label", saveAsNew);
-    els.updateBtn.hidden = false;
-    els.saveHint.textContent = t("actions.saveHintChangedStored");
-    return;
-  }
+  const canSaveCurrent = !isStored || changedStored;
+  const canSaveAsNew = isStored;
+  els.saveBtn.disabled = !canSaveCurrent;
+  els.saveAsNewBtn.disabled = !canSaveAsNew;
 
   const save = t("actions.save");
+  const saveAsNew = t("actions.saveAsNew");
   els.saveBtn.textContent = save;
   els.saveBtn.title = save;
   els.saveBtn.setAttribute("aria-label", save);
-  els.updateBtn.hidden = true;
+  els.saveAsNewBtn.textContent = saveAsNew;
+  els.saveAsNewBtn.title = saveAsNew;
+  els.saveAsNewBtn.setAttribute("aria-label", saveAsNew);
   if (isStored) {
+    if (changedStored) {
+      els.saveHint.textContent = t("actions.saveHintChangedStored");
+      return;
+    }
     els.saveHint.textContent = t("actions.saveHintStored");
     return;
   }
@@ -511,11 +517,7 @@ function saveDoc() {
 
   const docs = getDocs();
   const index = docs.findIndex((d) => d.id === doc.id);
-  if (index >= 0 && docSnapshot(docs[index]) !== docSnapshot(doc)) {
-    const next = { ...doc, id: uid(), updatedAt: new Date().toISOString() };
-    docs.unshift(next);
-    state.currentId = next.id;
-  } else if (index >= 0) {
+  if (index >= 0) {
     docs[index] = { ...doc, updatedAt: new Date().toISOString() };
     state.currentId = doc.id;
   } else {
@@ -526,10 +528,11 @@ function saveDoc() {
   setDocs(docs);
   updatePreview();
   renderStoredDocs();
+  showActionSuccess(els.saveBtn);
   return true;
 }
 
-function updateCurrentDoc() {
+function saveAsNewDoc() {
   const doc = collectForm();
   if (!doc.meetingDate || !doc.meetingTitle) {
     alert(t("alerts.fillDateAndTitle"));
@@ -537,18 +540,14 @@ function updateCurrentDoc() {
   }
 
   const docs = getDocs();
-  const index = docs.findIndex((d) => d.id === doc.id);
-  if (index < 0) {
-    alert(t("alerts.currentNotFound"));
-    return false;
-  }
-
-  docs[index] = { ...doc, updatedAt: new Date().toISOString() };
-  state.currentId = doc.id;
+  const next = { ...doc, id: uid(), updatedAt: new Date().toISOString() };
+  docs.unshift(next);
+  state.currentId = next.id;
 
   setDocs(docs);
   updatePreview();
   renderStoredDocs();
+  showActionSuccess(els.saveAsNewBtn);
   return true;
 }
 
@@ -653,7 +652,8 @@ function renderStoredDocs() {
     const li = document.createElement("li");
     li.className = "stored-doc-row";
     li.dataset.docId = doc.id;
-    const meta = new Date(doc.updatedAt).toLocaleString(intlLocale);
+    const updatedAt = new Date(doc.updatedAt).toLocaleString(intlLocale);
+    const meta = `${updatedAt} · [${doc.id}]`;
     const isDeletePending = state.pendingDeleteDocId === doc.id;
     const deleteBtnClass = isDeletePending ? "ghost icon-btn icon-btn-danger" : "ghost icon-btn";
     const deleteIcon = isDeletePending ? "error" : "delete";
@@ -789,14 +789,12 @@ async function openStoredDocWithGuard(docId) {
     return;
   }
   if (choice === "save_as_new") {
-    const saved = saveDoc();
+    const saved = saveAsNewDoc();
     if (saved) openStoredDoc(docId);
     return;
   }
   if (choice === "save_current") {
-    const draft = collectForm();
-    const isStored = Boolean(findSavedDocById(draft.id));
-    const saved = isStored ? updateCurrentDoc() : saveDoc();
+    const saved = saveDoc();
     if (saved) openStoredDoc(docId);
   }
 }
@@ -840,14 +838,67 @@ function getDocUrl(docId) {
   return url.toString();
 }
 
-function copyDocLink() {
-  const doc = collectForm();
-  navigator.clipboard.writeText(getDocUrl(doc.id));
+function showActionSuccess(button) {
+  if (!button) return;
+  const existingTimer = actionFeedbackTimers.get(button);
+  if (existingTimer) window.clearTimeout(existingTimer);
+  button.classList.add("btn-success");
+  const timerId = window.setTimeout(() => {
+    actionFeedbackTimers.delete(button);
+    if (!button.isConnected) return;
+    button.classList.remove("btn-success");
+  }, ACTION_FEEDBACK_MS);
+  actionFeedbackTimers.set(button, timerId);
 }
 
-function copyStoredDocLink(docId) {
+function showCopySuccess(button) {
+  if (!button) return;
+  const existingTimer = copyFeedbackTimers.get(button);
+  if (existingTimer) window.clearTimeout(existingTimer);
+  if (!copyFeedbackInitialState.has(button)) {
+    const icon = button.querySelector(".material-symbols-outlined");
+    copyFeedbackInitialState.set(button, {
+      title: button.getAttribute("title") || "",
+      aria: button.getAttribute("aria-label") || "",
+      icon: icon ? icon.textContent : "",
+    });
+  }
+  const base = copyFeedbackInitialState.get(button);
+  const icon = button.querySelector(".material-symbols-outlined");
+  const copied = t("common.copied");
+
+  button.classList.add("copy-success");
+  button.setAttribute("title", copied);
+  button.setAttribute("aria-label", copied);
+  if (icon) icon.textContent = "check_circle";
+
+  const timerId = window.setTimeout(() => {
+    copyFeedbackTimers.delete(button);
+    if (!button.isConnected) return;
+    button.classList.remove("copy-success");
+    button.setAttribute("title", base.title);
+    button.setAttribute("aria-label", base.aria);
+    if (icon) icon.textContent = base.icon;
+  }, COPY_FEEDBACK_MS);
+
+  copyFeedbackTimers.set(button, timerId);
+}
+
+async function writeToClipboard(text, feedbackButton) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showCopySuccess(feedbackButton);
+  } catch {}
+}
+
+function copyDocLink(feedbackButton) {
+  const doc = collectForm();
+  writeToClipboard(getDocUrl(doc.id), feedbackButton);
+}
+
+function copyStoredDocLink(docId, feedbackButton) {
   if (!docId) return;
-  navigator.clipboard.writeText(getDocUrl(docId));
+  writeToClipboard(getDocUrl(docId), feedbackButton);
 }
 
 function deleteStoredDoc(docId) {
@@ -901,7 +952,7 @@ function purgeTrashDoc(docId) {
 function copyProtocolToClipboard() {
   const text = els.preview.textContent || "";
   if (!text.trim()) return;
-  navigator.clipboard.writeText(text);
+  writeToClipboard(text, els.copyProtocol);
 }
 
 function openByHash() {
@@ -927,11 +978,6 @@ function handleSaveShortcut(event) {
   if (!isSaveKey || !isModifierPressed) return;
   event.preventDefault();
   const doc = collectForm();
-  const isStored = Boolean(findSavedDocById(doc.id));
-  if (isStored) {
-    updateCurrentDoc();
-    return;
-  }
   saveDoc();
 }
 
@@ -976,7 +1022,7 @@ document.addEventListener("click", (e) => {
 
   const copyStored = e.target.closest("[data-copy-doc-link]");
   if (copyStored) {
-    copyStoredDocLink(copyStored.dataset.copyDocLink);
+    copyStoredDocLink(copyStored.dataset.copyDocLink, copyStored);
     return;
   }
 
@@ -1016,9 +1062,9 @@ applyRandomHeaderPair();
 });
 
 els.saveBtn.addEventListener("click", saveDoc);
-els.updateBtn.addEventListener("click", updateCurrentDoc);
+els.saveAsNewBtn.addEventListener("click", saveAsNewDoc);
 els.newBtn.addEventListener("click", clearForm);
-els.copyDocLink.addEventListener("click", copyDocLink);
+els.copyDocLink.addEventListener("click", () => copyDocLink(els.copyDocLink));
 els.copyProtocol.addEventListener("click", copyProtocolToClipboard);
 els.exportMd.addEventListener("click", exportMd);
 els.exportDocx.addEventListener("click", () => exportDocx().catch(() => alert(t("alerts.exportDocxError"))));

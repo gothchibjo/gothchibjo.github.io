@@ -20,11 +20,11 @@ export const LOCALE_RU = {
   },
   actions: {
     save: "Сохранить",
-    saveAsNew: "Сохранить как новый",
+    saveAsNew: "Копировать",
     updateCurrent: "Обновить текущий",
     discardChanges: "Сбросить изменения",
     clear: "Очистить",
-    saveHintChangedStored: "Изменения сохранятся как новый документ. Исходный останется без изменений.",
+    saveHintChangedStored: "Есть изменения. Можно сохранить текущий документ или создать копию.",
     saveHintStored: "Редактируется сохраненный документ.",
     saveHintDraft: "Новый документ (черновик).",
   },
@@ -66,6 +66,7 @@ export const LOCALE_RU = {
     removeTaskConfirm: "Подтвердить удаление задачи",
   },
   common: {
+    copied: "Скопировано",
     remove: "Удалить",
     noData: "Нет данных",
     untitled: "Без названия",

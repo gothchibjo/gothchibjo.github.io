@@ -20,11 +20,11 @@ export const LOCALE_EN = {
   },
   actions: {
     save: "Save",
-    saveAsNew: "Save as new",
+    saveAsNew: "Copy",
     updateCurrent: "Update current",
     discardChanges: "Discard changes",
     clear: "Clear",
-    saveHintChangedStored: "Changes will be saved as a new document. The original will remain unchanged.",
+    saveHintChangedStored: "There are changes. You can save current or create a copy.",
     saveHintStored: "Editing a saved document.",
     saveHintDraft: "New document (draft).",
   },
@@ -66,6 +66,7 @@ export const LOCALE_EN = {
     removeTaskConfirm: "Confirm task delete",
   },
   common: {
+    copied: "Copied",
     remove: "Delete",
     noData: "No data",
     untitled: "Untitled",
