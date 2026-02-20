@@ -73,12 +73,16 @@ export function renderTopicsModelToInput(topics) {
     .map((topic) => {
       const normalized = normalizeTopic(topic.text || "");
       const title = cleanTopicTitle(normalized.main);
-      if (!normalized.bullets.length) return `${title}.`;
+      const hasTerminalExclamation = /!$/.test(title);
+      if (!normalized.bullets.length) return hasTerminalExclamation ? title : `${title}.`;
       const bullets = normalized.bullets.map((bullet, index) => {
+        const cleaned = cleanBullet(bullet);
+        if (/!$/.test(cleaned)) return `- ${cleaned}`;
         const punct = index === normalized.bullets.length - 1 ? "." : ";";
-        return `- ${cleanBullet(bullet)}${punct}`;
+        return `- ${cleaned}${punct}`;
       });
-      return `${title}:\n${bullets.join("\n")}`;
+      const titleSuffix = hasTerminalExclamation ? "" : ":";
+      return `${title}${titleSuffix}\n${bullets.join("\n")}`;
     })
     .join("\n\n");
 }

@@ -286,6 +286,18 @@ function collectForm() {
 }
 
 function generateText(doc) {
+  const emphasizeLine = (line) => {
+    if (!line || !line.includes("!")) return line;
+    const marker = line.includes("!!") ? "**" : "*";
+    const prefixedMatch = line.match(/^(\s*(?:-\s+|\d+(?:\.\d+)?\.\s+))(.*)$/);
+    if (prefixedMatch) {
+      const [, prefix, content] = prefixedMatch;
+      if (!content.trim()) return line;
+      return `${prefix}${marker}${content}${marker}`;
+    }
+    return `${marker}${line}${marker}`;
+  };
+
   const formatDueDate = (due) => {
     if (!due) return t("common.noDue");
     const parsed = new Date(`${due}T00:00:00`);
@@ -296,6 +308,7 @@ function generateText(doc) {
   const formatListItem = (text, isLast) => {
     const trimmed = text.trim().replace(/[.;:]+\s*$/, "");
     if (!trimmed) return "";
+    if (/!$/.test(trimmed)) return trimmed;
     return `${trimmed}${isLast ? "." : ";"}`;
   };
   const formatDecision = (text) => {
@@ -307,15 +320,15 @@ function generateText(doc) {
   };
 
   const lines = [];
-  lines.push(`${doc.meetingDate || "YYYY-MM-DD"} ${doc.meetingTitle || t("common.untitled")}`);
-  if (doc.meta) lines.push(doc.meta);
+  lines.push(emphasizeLine(`${doc.meetingDate || "YYYY-MM-DD"} ${doc.meetingTitle || t("common.untitled")}`));
+  if (doc.meta) lines.push(emphasizeLine(doc.meta));
   lines.push("");
 
   lines.push(`1. ${t("protocol.participants")}:`);
   if (doc.participants.length === 0) lines.push(`- ${t("common.empty")}`);
   doc.participants.forEach((item, index) => {
     const rendered = formatListItem(item.text, index === doc.participants.length - 1);
-    if (rendered) lines.push(`- ${rendered}`);
+    if (rendered) lines.push(emphasizeLine(`- ${rendered}`));
   });
   lines.push("");
 
@@ -324,11 +337,14 @@ function generateText(doc) {
   doc.topics.forEach((item, index) => {
     const topic = normalizeTopic(item.text);
     const title = topic.main.replace(/[.:;]+\s*$/, "").trim();
-    lines.push(`2.${index + 1}. ${title}${topic.bullets.length ? ":" : "."}`);
+    const hasTerminalExclamation = /!$/.test(title);
+    const topicSuffix = hasTerminalExclamation ? "" : topic.bullets.length ? ":" : ".";
+    lines.push(emphasizeLine(`2.${index + 1}. ${title}${topicSuffix}`));
     topic.bullets.forEach((b, bulletIndex) => {
       const rendered = formatListItem(b, bulletIndex === topic.bullets.length - 1);
-      if (rendered) lines.push(`  - ${rendered}`);
+      if (rendered) lines.push(emphasizeLine(`  - ${rendered}`));
     });
+    if (topic.bullets.length > 0 && index < doc.topics.length - 1) lines.push("");
   });
   lines.push("");
 
@@ -336,7 +352,7 @@ function generateText(doc) {
   if (doc.decisions.length === 0) lines.push(`3.1. ${t("common.empty")}`);
   doc.decisions.forEach((item, index) => {
     const rendered = formatDecision(item.text);
-    if (rendered) lines.push(`3.${index + 1}. ${rendered}`);
+    if (rendered) lines.push(emphasizeLine(`3.${index + 1}. ${rendered}`));
   });
   lines.push("");
 
@@ -346,12 +362,40 @@ function generateText(doc) {
     const status = task.completed ? "[v]" : "[ ]";
     const owner = task.owner || t("common.unassigned");
     const due = formatDueDate(task.due);
-    lines.push(`4.${index + 1}. ${status} ${task.title} — ${owner}, ${due}`);
+    lines.push(emphasizeLine(`4.${index + 1}. ${status} ${task.title} — ${owner}, ${due}`));
   });
   lines.push("");
   lines.push(t("protocol.footer"));
 
   return lines.join("\n");
+}
+
+function generateMarkdownText(doc) {
+  const escapeOrderedPrefix = (line) => line.replace(/^(\s*\d+)\./, "$1\\.");
+  return generateText(doc)
+    .split("\n")
+    .map((line) => {
+      if (!line) return "";
+      return `${escapeOrderedPrefix(line)}  `;
+    })
+    .join("\n");
+}
+
+function escapeHtml(value) {
+  return (value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function renderPreviewText(text) {
+  return escapeHtml(text)
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+}
+
+function buildClipboardHtml(text) {
+  return `<div style="white-space: pre-wrap;">${renderPreviewText(text)}</div>`;
 }
 
 function formatDate(date) {
@@ -450,7 +494,8 @@ function renderTaskReports() {
 function updatePreview() {
   const doc = collectForm();
   state.currentId = doc.id;
-  els.preview.textContent = generateText(doc);
+  const rendered = generateText(doc);
+  els.preview.innerHTML = renderPreviewText(rendered);
   syncUrlWithDoc(doc.id);
   renderTaskReports();
   updateSaveUi(doc);
@@ -747,7 +792,7 @@ function downloadBlob(blob, filename) {
 
 function exportMd() {
   const doc = collectForm();
-  const blob = new Blob([generateText(doc)], { type: "text/markdown;charset=utf-8" });
+  const blob = new Blob([generateMarkdownText(doc)], { type: "text/markdown;charset=utf-8" });
   downloadBlob(blob, `${doc.meetingDate || t("common.fileBase")}-${doc.id}.md`);
 }
 
@@ -891,6 +936,23 @@ async function writeToClipboard(text, feedbackButton) {
   } catch {}
 }
 
+async function writeRichToClipboard(text, html, feedbackButton) {
+  try {
+    if (navigator.clipboard?.write && window.ClipboardItem) {
+      const payload = new ClipboardItem({
+        "text/plain": new Blob([text], { type: "text/plain" }),
+        "text/html": new Blob([html], { type: "text/html" }),
+      });
+      await navigator.clipboard.write([payload]);
+    } else {
+      await navigator.clipboard.writeText(text);
+    }
+    showCopySuccess(feedbackButton);
+  } catch {
+    writeToClipboard(text, feedbackButton);
+  }
+}
+
 function copyDocLink(feedbackButton) {
   const doc = collectForm();
   writeToClipboard(getDocUrl(doc.id), feedbackButton);
@@ -950,9 +1012,9 @@ function purgeTrashDoc(docId) {
 }
 
 function copyProtocolToClipboard() {
-  const text = els.preview.textContent || "";
+  const text = generateText(collectForm());
   if (!text.trim()) return;
-  writeToClipboard(text, els.copyProtocol);
+  writeRichToClipboard(text, buildClipboardHtml(text), els.copyProtocol);
 }
 
 function openByHash() {
