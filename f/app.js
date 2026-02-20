@@ -121,16 +121,6 @@ function extractMentionContext(target) {
   if (!isMentionEditableTarget(target)) return null;
   const cursorPos = typeof target.selectionStart === "number" ? target.selectionStart : target.value.length;
   const prefix = target.value.slice(0, cursorPos);
-  const match = prefix.match(/(?:^|\s)@([\p{L}\p{N}_]*)$/u);
-  if (match) {
-    const query = match[1] || "";
-    return {
-      mode: "mention",
-      query,
-      start: cursorPos - query.length - 1,
-      end: cursorPos,
-    };
-  }
 
   if (target === els.participantsInput) {
     const participantMatch = prefix.match(/(?:^|[\n;,])\s*(?:[-*•]\s*)?([\p{L}\p{N}_][\p{L}\p{N}_'`\- ]*)$/u);
@@ -145,6 +135,37 @@ function extractMentionContext(target) {
         };
       }
     }
+    return null;
+  }
+
+  if (target.dataset?.field === "assignee") {
+    const assigneeMatch = prefix.match(/^\s*([\p{L}\p{N}_][\p{L}\p{N}_'`\- ]*)$/u);
+    if (assigneeMatch) {
+      const query = (assigneeMatch[1] || "").trimStart();
+      if (query) {
+        const valueStart = prefix.search(/\S/u);
+        return {
+          mode: "participants",
+          query,
+          start: valueStart >= 0 ? valueStart : 0,
+          end: cursorPos,
+        };
+      }
+    }
+    return null;
+  }
+
+  if (target !== els.topicsInput && target !== els.decisionsInput) return null;
+
+  const match = prefix.match(/(?:^|\s)@([\p{L}\p{N}_]*)$/u);
+  if (match) {
+    const query = match[1] || "";
+    return {
+      mode: "mention",
+      query,
+      start: cursorPos - query.length - 1,
+      end: cursorPos,
+    };
   }
   return null;
 }
@@ -265,8 +286,9 @@ function applyMentionSuggestion(value, options = {}) {
   const isParticipantsMode = mentionUi.mode === "participants";
   const replacementBase = isParticipantsMode ? value : `@${value}`;
   const nextChar = target.value.slice(mentionUi.rangeEnd, mentionUi.rangeEnd + 1);
-  const separatorRegex = isParticipantsMode ? /[\n;,]/ : /[\s,.;:!?)]/;
-  const defaultSeparator = isParticipantsMode ? "\n" : " ";
+  const isParticipantsTextarea = isParticipantsMode && target === els.participantsInput;
+  const separatorRegex = isParticipantsTextarea ? /[\n;,]/ : /[\s,.;:!?)]/;
+  const defaultSeparator = isParticipantsTextarea ? "\n" : "";
   const needsSeparator = !nextChar || !separatorRegex.test(nextChar);
   const separator = forceLineBreak ? "\n" : needsSeparator ? defaultSeparator : "";
   const replacement = `${replacementBase}${separator}`;
@@ -1551,7 +1573,8 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     const selected = mentionUi.items[mentionUi.activeIndex] || mentionUi.items[0];
     if (!selected) return;
-    const forceLineBreak = mentionUi.mode === "participants" && event.key === "Enter";
+    const forceLineBreak =
+      mentionUi.mode === "participants" && mentionUi.target === els.participantsInput && event.key === "Enter";
     applyMentionSuggestion(selected, { forceLineBreak });
     return;
   }
