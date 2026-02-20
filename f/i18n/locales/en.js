@@ -50,7 +50,7 @@ export const LOCALE_EN = {
   reports: {
     title: "Task report (to be done)",
     byDeadline: "By deadline",
-    byOwner: "By owner",
+    byAssignee: "By assignee",
     totalTasks: "Total tasks: {count}",
     overdue: "Overdue: {count}",
     next7Days: "Next 7 days: {count}",
@@ -59,7 +59,7 @@ export const LOCALE_EN = {
   row: {
     taskTitle: "What to do",
     value: "Enter value",
-    taskOwner: "@Owner",
+    taskAssignee: "@Assignee",
     taskDone: "Completed",
     addTask: "Add task",
     removeTask: "Delete task",

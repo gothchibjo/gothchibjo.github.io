@@ -24,6 +24,15 @@ const { t, applyToDocument, intlLocale } = createI18n(activeLocale);
 const copyFeedbackTimers = new WeakMap();
 const copyFeedbackInitialState = new WeakMap();
 const actionFeedbackTimers = new WeakMap();
+const mentionUi = {
+  root: null,
+  target: null,
+  mode: "mention",
+  rangeStart: 0,
+  rangeEnd: 0,
+  activeIndex: 0,
+  items: [],
+};
 
 const state = {
   currentId: null,
@@ -47,7 +56,7 @@ const els = {
   storedDocs: document.getElementById("storedDocs"),
   trashDocs: document.getElementById("trashDocs"),
   deadlineReport: document.getElementById("deadlineReport"),
-  ownerReport: document.getElementById("ownerReport"),
+  assigneeReport: document.getElementById("assigneeReport"),
   saveBtn: document.getElementById("saveBtn"),
   saveAsNewBtn: document.getElementById("saveAsNewBtn"),
   newBtn: document.getElementById("newBtn"),
@@ -66,6 +75,220 @@ function applyRandomHeaderPair() {
   const [leftTitle, rightTitle] = getRandomHeaderPair(activeLocale);
   if (els.inputPanelTitle) els.inputPanelTitle.textContent = leftTitle;
   if (els.previewPanelTitle) els.previewPanelTitle.textContent = rightTitle;
+}
+
+function isMentionEditableTarget(target) {
+  if (!target) return false;
+  if (target instanceof HTMLTextAreaElement) return true;
+  return target instanceof HTMLInputElement && target.type === "text";
+}
+
+function ensureMentionUi() {
+  if (mentionUi.root) return mentionUi.root;
+  const root = document.createElement("div");
+  root.className = "mention-suggest hidden";
+  root.setAttribute("role", "listbox");
+  root.addEventListener("mousedown", (event) => {
+    const item = event.target.closest("[data-mention-value]");
+    if (!item) return;
+    event.preventDefault();
+    applyMentionSuggestion(item.dataset.mentionValue || "");
+  });
+  document.body.appendChild(root);
+  mentionUi.root = root;
+  return root;
+}
+
+function hideMentionUi() {
+  if (!mentionUi.root) return;
+  mentionUi.root.classList.add("hidden");
+  mentionUi.target = null;
+  mentionUi.mode = "mention";
+  mentionUi.items = [];
+  mentionUi.activeIndex = 0;
+}
+
+function positionMentionUi() {
+  if (!mentionUi.root || !mentionUi.target) return;
+  const rect = mentionUi.target.getBoundingClientRect();
+  mentionUi.root.style.left = `${window.scrollX + rect.left}px`;
+  const topOffset = Math.min(rect.height + 8, 120);
+  mentionUi.root.style.top = `${window.scrollY + rect.top + topOffset}px`;
+  mentionUi.root.style.minWidth = `${Math.max(180, Math.min(rect.width, 420))}px`;
+}
+
+function extractMentionContext(target) {
+  if (!isMentionEditableTarget(target)) return null;
+  const cursorPos = typeof target.selectionStart === "number" ? target.selectionStart : target.value.length;
+  const prefix = target.value.slice(0, cursorPos);
+  const match = prefix.match(/(?:^|\s)@([\p{L}\p{N}_]*)$/u);
+  if (match) {
+    const query = match[1] || "";
+    return {
+      mode: "mention",
+      query,
+      start: cursorPos - query.length - 1,
+      end: cursorPos,
+    };
+  }
+
+  if (target === els.participantsInput) {
+    const participantMatch = prefix.match(/(?:^|[\n;,])\s*(?:[-*•]\s*)?([\p{L}\p{N}_][\p{L}\p{N}_'`\- ]*)$/u);
+    if (participantMatch) {
+      const query = (participantMatch[1] || "").trimStart();
+      if (query) {
+        return {
+          mode: "participants",
+          query,
+          start: cursorPos - query.length,
+          end: cursorPos,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function collectMentionNamesFromText(text) {
+  const names = [];
+  for (const match of (text || "").matchAll(/(^|\s)@([\p{L}\p{N}_]+)/gu)) {
+    names.push(match[2]);
+  }
+  return names;
+}
+
+function collectMentionCandidates() {
+  return collectParticipantCandidates();
+}
+
+function collectParticipantNameFrequency(currentParticipantsRaw = "") {
+  const score = new Map();
+  const bump = (name) => {
+    const cleaned = (name || "").trim().replace(/^@+/, "");
+    if (!cleaned) return;
+    const key = cleaned.toLocaleLowerCase();
+    const prev = score.get(key);
+    if (prev) {
+      prev.count += 1;
+      return;
+    }
+    score.set(key, { name: cleaned, count: 1 });
+  };
+
+  collectParticipantsFromInput(currentParticipantsRaw).forEach((item) => bump(item.text));
+  getDocs().forEach((doc) => {
+    collectParticipantsFromInput(doc.participantsRaw || "").forEach((item) => bump(item.text));
+  });
+
+  return score;
+}
+
+function collectParticipantReferenceNames(currentParticipantsRaw = "") {
+  return [...collectParticipantNameFrequency(currentParticipantsRaw).values()]
+    .map((item) => item.name);
+}
+
+function collectParticipantCandidates() {
+  return [...collectParticipantNameFrequency(els.participantsInput.value).values()]
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, intlLocale))
+    .map((item) => item.name);
+}
+
+function renderMentionUiItems() {
+  if (!mentionUi.root) return;
+  mentionUi.root.innerHTML = "";
+  mentionUi.items.forEach((value, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mention-suggest-item";
+    if (index === mentionUi.activeIndex) button.classList.add("active");
+    button.dataset.mentionValue = value;
+    button.setAttribute("aria-selected", index === mentionUi.activeIndex ? "true" : "false");
+    button.textContent = mentionUi.mode === "participants" ? value : `@${value}`;
+    mentionUi.root.appendChild(button);
+  });
+}
+
+function showMentionUi(target, context) {
+  const root = ensureMentionUi();
+  mentionUi.mode = context.mode;
+  const queryLower = context.query.toLocaleLowerCase();
+  const baseCandidates = context.mode === "participants" ? collectParticipantCandidates() : collectMentionCandidates();
+  let nextItems = baseCandidates
+    .filter((name) => !queryLower || name.toLocaleLowerCase().includes(queryLower))
+    .slice(0, 8);
+  if (context.mode === "participants" && context.query) {
+    const exactIndex = nextItems.findIndex((name) => name.toLocaleLowerCase() === queryLower);
+    if (exactIndex >= 0) {
+      const [exact] = nextItems.splice(exactIndex, 1);
+      nextItems.unshift(exact);
+    } else {
+      nextItems.unshift(context.query);
+    }
+    const seen = new Set();
+    nextItems = nextItems.filter((name) => {
+      const key = name.toLocaleLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  mentionUi.items = nextItems.slice(0, 8);
+  if (!mentionUi.items.length && context.query) mentionUi.items = [context.query];
+  if (!mentionUi.items.length) {
+    hideMentionUi();
+    return;
+  }
+
+  mentionUi.target = target;
+  mentionUi.rangeStart = context.start;
+  mentionUi.rangeEnd = context.end;
+  mentionUi.activeIndex = 0;
+  renderMentionUiItems();
+  root.classList.remove("hidden");
+  positionMentionUi();
+}
+
+function updateMentionUiForTarget(target) {
+  const context = extractMentionContext(target);
+  if (!context) {
+    hideMentionUi();
+    return;
+  }
+  showMentionUi(target, context);
+}
+
+function applyMentionSuggestion(value, options = {}) {
+  if (!mentionUi.target || !value) return;
+  const { forceLineBreak = false } = options;
+  const target = mentionUi.target;
+  const isParticipantsMode = mentionUi.mode === "participants";
+  const replacementBase = isParticipantsMode ? value : `@${value}`;
+  const nextChar = target.value.slice(mentionUi.rangeEnd, mentionUi.rangeEnd + 1);
+  const separatorRegex = isParticipantsMode ? /[\n;,]/ : /[\s,.;:!?)]/;
+  const defaultSeparator = isParticipantsMode ? "\n" : " ";
+  const needsSeparator = !nextChar || !separatorRegex.test(nextChar);
+  const separator = forceLineBreak ? "\n" : needsSeparator ? defaultSeparator : "";
+  const replacement = `${replacementBase}${separator}`;
+  const nextValue =
+    `${target.value.slice(0, mentionUi.rangeStart)}${replacement}${target.value.slice(mentionUi.rangeEnd)}`;
+  target.value = nextValue;
+  const nextCaretPos = mentionUi.rangeStart + replacement.length;
+  if (typeof target.setSelectionRange === "function") target.setSelectionRange(nextCaretPos, nextCaretPos);
+  hideMentionUi();
+  target.dispatchEvent(new Event("input", { bubbles: true }));
+  target.focus();
+}
+
+function moveMentionSelection(direction) {
+  if (!mentionUi.items.length) return;
+  const lastIndex = mentionUi.items.length - 1;
+  if (direction > 0) {
+    mentionUi.activeIndex = mentionUi.activeIndex >= lastIndex ? 0 : mentionUi.activeIndex + 1;
+  } else {
+    mentionUi.activeIndex = mentionUi.activeIndex <= 0 ? lastIndex : mentionUi.activeIndex - 1;
+  }
+  renderMentionUiItems();
 }
 
 function uid() {
@@ -120,11 +343,187 @@ function normalizeTasks(tasks) {
   return (tasks || [])
     .map((task) => ({
       title: (task.title || "").trim(),
-      owner: (task.owner || "").trim(),
+      assignee: (task.assignee || task.owner || "").trim(),
       due: task.due || "",
       completed: Boolean(task.completed),
     }))
     .filter((task) => Boolean(task.title));
+}
+
+function toIsoDate(year, month, day) {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return "";
+  const parsed = new Date(Date.UTC(y, m - 1, d));
+  if (
+    parsed.getUTCFullYear() !== y ||
+    parsed.getUTCMonth() + 1 !== m ||
+    parsed.getUTCDate() !== d
+  ) {
+    return "";
+  }
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+function parseLooseDateToken(token, locale) {
+  const isoMatch = token.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) return toIsoDate(isoMatch[1], isoMatch[2], isoMatch[3]);
+
+  const monthYearDotMatch = token.match(/^(\d{1,2})\.(\d{4})$/);
+  if (monthYearDotMatch) {
+    return toIsoDate(monthYearDotMatch[2], monthYearDotMatch[1], 1);
+  }
+
+  const dotMatch = token.match(/^(\d{1,2})\.(\d{1,2})(?:\.(\d{2}|\d{4}))?$/);
+  if (dotMatch) {
+    const now = new Date();
+    const yearRaw = dotMatch[3];
+    const year = yearRaw ? (yearRaw.length === 2 ? 2000 + Number(yearRaw) : Number(yearRaw)) : now.getFullYear();
+    return toIsoDate(year, dotMatch[2], dotMatch[1]);
+  }
+
+  const monthYearSlashMatch = token.match(/^(\d{1,2})\/(\d{4})$/);
+  if (monthYearSlashMatch) {
+    const isEnglishLocale = String(locale || "").toLowerCase().startsWith("en");
+    if (!isEnglishLocale) return "";
+    return toIsoDate(monthYearSlashMatch[2], monthYearSlashMatch[1], 1);
+  }
+
+  const slashMatch = token.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?$/);
+  if (slashMatch) {
+    const now = new Date();
+    const yearRaw = slashMatch[3];
+    const year = yearRaw ? (yearRaw.length === 2 ? 2000 + Number(yearRaw) : Number(yearRaw)) : now.getFullYear();
+    const isEnglishLocale = String(locale || "").toLowerCase().startsWith("en");
+    const month = isEnglishLocale ? slashMatch[1] : slashMatch[2];
+    const day = isEnglishLocale ? slashMatch[2] : slashMatch[1];
+    return toIsoDate(year, month, day);
+  }
+
+  return "";
+}
+
+function isAssigneeBoundaryChar(char) {
+  if (!char) return true;
+  return /[\s,.;:!?()[\]{}"'`«»]/u.test(char);
+}
+
+function findLastAssigneeTag(text, participantNames = []) {
+  let exactMatch = null;
+  let fallbackMatch = null;
+  const normalizedParticipantNames = [...new Set((participantNames || []).map((name) => (name || "").trim()).filter(Boolean))]
+    .sort((a, b) => b.length - a.length);
+
+  for (const match of text.matchAll(/(^|\s)@/gu)) {
+    const prefix = match[1] || "";
+    const atStart = (match.index || 0) + prefix.length;
+    const afterAt = text.slice(atStart + 1);
+    const lowerAfterAt = afterAt.toLocaleLowerCase();
+    const matchedName = normalizedParticipantNames.find((name) => {
+      const lowerName = name.toLocaleLowerCase();
+      if (!lowerAfterAt.startsWith(lowerName)) return false;
+      const boundaryChar = afterAt.charAt(name.length);
+      return isAssigneeBoundaryChar(boundaryChar);
+    });
+    if (matchedName) {
+      const value = `@${matchedName}`;
+      exactMatch = { value, start: atStart, end: atStart + value.length };
+    }
+  }
+
+  for (const match of text.matchAll(/(^|\s)(@[\p{L}\p{N}_]+)/gu)) {
+    const prefix = match[1] || "";
+    const value = match[2] || "";
+    const start = (match.index || 0) + prefix.length;
+    fallbackMatch = { value, start, end: start + value.length };
+  }
+
+  return exactMatch || fallbackMatch;
+}
+
+function findLastDueDate(text, locale) {
+  const datePatterns = [
+    /\b\d{4}-\d{2}-\d{2}\b/g,
+    /\b\d{1,2}\.\d{4}\b/g,
+    /\b\d{1,2}\.\d{1,2}(?:\.\d{2}|\.\d{4})?\b/g,
+    /\b\d{1,2}\/\d{4}\b/g,
+    /\b\d{1,2}\/\d{1,2}(?:\/\d{2}|\/\d{4})?\b/g,
+  ];
+  let last = null;
+  datePatterns.forEach((pattern) => {
+    for (const match of text.matchAll(pattern)) {
+      const token = match[0] || "";
+      const iso = parseLooseDateToken(token, locale);
+      if (!iso) continue;
+      const start = match.index || 0;
+      const candidate = { value: token, iso, start, end: start + token.length };
+      if (!last || candidate.start >= last.start) last = candidate;
+    }
+  });
+  return last;
+}
+
+function removeRanges(text, ranges) {
+  return [...ranges]
+    .sort((a, b) => b.start - a.start)
+    .reduce((acc, range) => `${acc.slice(0, range.start)}${acc.slice(range.end)}`, text);
+}
+
+function extractAutoTaskFromLine(line, locale, participantNames = []) {
+  const normalizedLine = (line || "")
+    .trim()
+    .replace(/^\s*(?:-\s+|\d+(?:\.\d+)*\.\s+)/, "")
+    .trim();
+  if (!normalizedLine) return null;
+
+  const assignee = findLastAssigneeTag(normalizedLine, participantNames);
+  if (!assignee) return null;
+  const dueDate = findLastDueDate(normalizedLine, locale);
+
+  const ranges = [assignee, dueDate].filter(Boolean);
+  let title = removeRanges(normalizedLine, ranges)
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,;:.!?])/g, "$1")
+    .replace(/^[\s,;:.\-–—]+|[\s,;:.\-–—]+$/g, "")
+    .trim();
+  if (!title) title = normalizedLine;
+
+  return {
+    title,
+    assignee: assignee.value,
+    due: dueDate ? dueDate.iso : "",
+    completed: false,
+  };
+}
+
+function collectAutoTasks(doc) {
+  const participantsRaw = normalizeRawText(
+    doc.participantsRaw ?? renderParticipantsToInput(doc.participants || []),
+  );
+  const topicsRaw = normalizeRawText(doc.topicsRaw ?? renderTopicsModelToInput(doc.topics || []));
+  const decisionsRaw = normalizeRawText(doc.decisionsRaw ?? renderDecisionsToInput(doc.decisions || []));
+
+  const participantNames = collectParticipantReferenceNames(participantsRaw);
+
+  return [participantsRaw, topicsRaw, decisionsRaw]
+    .flatMap((chunk) => chunk.split("\n"))
+    .map((line) => extractAutoTaskFromLine(line, activeLocale, participantNames))
+    .filter(Boolean);
+}
+
+function resolveDocumentTasks(doc) {
+  const manualTasks = normalizeTasks(doc.tasks || []);
+  const autoTasks = collectAutoTasks(doc);
+  const seen = new Set(manualTasks.map((task) => `${task.title}\u0000${task.assignee}\u0000${task.due}`));
+  const merged = [...manualTasks];
+  autoTasks.forEach((task) => {
+    const key = `${task.title}\u0000${task.assignee}\u0000${task.due}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(task);
+  });
+  return merged;
 }
 
 function docSnapshot(doc) {
@@ -206,7 +605,7 @@ function rowTemplate(type, value = {}) {
     wrap.innerHTML = `
       <input type="checkbox" data-field="completed" ${value.completed ? "checked" : ""} title="${t("row.taskDone")}" aria-label="${t("row.taskDone")}">
       <input type="text" data-field="title" placeholder="${t("row.taskTitle")}" value="${value.title || ""}">
-      <input type="text" data-field="owner" placeholder="${t("row.taskOwner")}" value="${value.owner || ""}">
+      <input type="text" data-field="assignee" placeholder="${t("row.taskAssignee")}" value="${value.assignee || value.owner || ""}">
       <input type="date" data-field="due" value="${value.due || ""}">
       <button type="button" class="ghost icon-btn" data-add="tasks" title="${t("row.addTask")}" aria-label="${t("row.addTask")}">
         <span class="material-symbols-outlined" aria-hidden="true">add</span>
@@ -238,11 +637,11 @@ function collectRows(type) {
     return rows
       .map((row) => {
         const title = row.querySelector('[data-field="title"]').value.trim();
-        const owner = row.querySelector('[data-field="owner"]').value.trim();
+        const assignee = row.querySelector('[data-field="assignee"]').value.trim();
         const due = row.querySelector('[data-field="due"]').value;
         const completed = row.querySelector('[data-field="completed"]').checked;
         if (!title) return null;
-        return { title, owner, due, completed };
+        return { title, assignee, due, completed };
       })
       .filter(Boolean);
   }
@@ -286,6 +685,17 @@ function collectForm() {
 }
 
 function generateText(doc) {
+  const strikeLine = (line) => {
+    if (!line) return line;
+    const prefixedMatch = line.match(/^(\s*(?:-\s+|\d+(?:\.\d+)?\.\s+))(.*)$/);
+    if (prefixedMatch) {
+      const [, prefix, content] = prefixedMatch;
+      if (!content.trim()) return line;
+      return `${prefix}~~${content}~~`;
+    }
+    return `~~${line}~~`;
+  };
+
   const emphasizeLine = (line) => {
     if (!line || !line.includes("!")) return line;
     const marker = line.includes("!!") ? "**" : "*";
@@ -356,13 +766,16 @@ function generateText(doc) {
   });
   lines.push("");
 
+  const resolvedTasks = resolveDocumentTasks(doc);
   lines.push(`4. ${t("protocol.tasks")}:`);
-  if (doc.tasks.length === 0) lines.push(`4.1. ${t("common.empty")}`);
-  doc.tasks.forEach((task, index) => {
+  if (resolvedTasks.length === 0) lines.push(`4.1. ${t("common.empty")}`);
+  resolvedTasks.forEach((task, index) => {
     const status = task.completed ? "[v]" : "[ ]";
-    const owner = task.owner || t("common.unassigned");
+    const assignee = task.assignee || t("common.unassigned");
     const due = formatDueDate(task.due);
-    lines.push(emphasizeLine(`4.${index + 1}. ${status} ${task.title} — ${owner}, ${due}`));
+    const line = `4.${index + 1}. ${status} ${task.title} — ${assignee}, ${due}`;
+    const maybeStruck = task.completed ? strikeLine(line) : line;
+    lines.push(emphasizeLine(maybeStruck));
   });
   lines.push("");
   lines.push(t("protocol.footer"));
@@ -390,6 +803,7 @@ function escapeHtml(value) {
 
 function renderPreviewText(text) {
   return escapeHtml(text)
+    .replace(/~~([^~\n]+)~~/g, "<s>$1</s>")
     .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
 }
@@ -430,7 +844,7 @@ function renderTaskReports() {
   const allTasks = [];
 
   allDocs.forEach((doc) => {
-    (doc.tasks || []).forEach((task) => {
+    resolveDocumentTasks(doc).forEach((task) => {
       if (!task.title) return;
       if (task.completed) return;
       allTasks.push({
@@ -464,21 +878,21 @@ function renderTaskReports() {
     if (due <= weekEnd) week += 1;
   });
 
-  const byOwnerMap = allTasks.reduce((acc, task) => {
-    const owner = task.owner || t("common.unassigned");
-    acc.set(owner, (acc.get(owner) || 0) + 1);
+  const byAssigneeMap = allTasks.reduce((acc, task) => {
+    const assignee = task.assignee || t("common.unassigned");
+    acc.set(assignee, (acc.get(assignee) || 0) + 1);
     return acc;
   }, new Map());
 
-  const byOwner = [...byOwnerMap.entries()]
+  const byAssignee = [...byAssigneeMap.entries()]
     .sort((a, b) => b[1] - a[1])
-    .map(([owner, count]) => `${owner}: ${count}`);
+    .map(([assignee, count]) => `${assignee}: ${count}`);
 
   const nearestTasks = allTasks
     .filter((task) => Boolean(task.due))
     .sort((a, b) => a.due.localeCompare(b.due))
     .slice(0, 3)
-    .map((task) => `${formatDate(task.due)} - ${task.title} (${task.owner || t("common.unassigned")})`);
+    .map((task) => `${formatDate(task.due)} - ${task.title} (${task.assignee || t("common.unassigned")})`);
 
   renderReportList(els.deadlineReport, [
     t("reports.totalTasks", { count: allTasks.length }),
@@ -488,7 +902,12 @@ function renderTaskReports() {
     ...nearestTasks,
   ]);
 
-  renderReportList(els.ownerReport, byOwner);
+  renderReportList(els.assigneeReport, byAssignee);
+}
+
+function updateMentionValidation() {
+  els.topicsInput.classList.remove("invalid-mention");
+  els.decisionsInput.classList.remove("invalid-mention");
 }
 
 function updatePreview() {
@@ -498,6 +917,7 @@ function updatePreview() {
   els.preview.innerHTML = renderPreviewText(rendered);
   syncUrlWithDoc(doc.id);
   renderTaskReports();
+  updateMentionValidation();
   updateSaveUi(doc);
   setDraft(doc);
 }
@@ -1044,6 +1464,10 @@ function handleSaveShortcut(event) {
 }
 
 document.addEventListener("click", (e) => {
+  if (mentionUi.root && !e.target.closest(".mention-suggest") && !isMentionEditableTarget(e.target)) {
+    hideMentionUi();
+  }
+
   const add = e.target.closest("[data-add]");
   if (add) {
     addRow(add.dataset.add);
@@ -1107,6 +1531,63 @@ document.addEventListener("click", (e) => {
 });
 
 document.addEventListener("keydown", handleSaveShortcut, { capture: true });
+document.addEventListener("keydown", (event) => {
+  if (!mentionUi.target || mentionUi.root?.classList.contains("hidden")) return;
+  if (document.activeElement !== mentionUi.target) return;
+
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    moveMentionSelection(1);
+    return;
+  }
+
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    moveMentionSelection(-1);
+    return;
+  }
+
+  if (event.key === "Enter" || event.key === "Tab") {
+    event.preventDefault();
+    const selected = mentionUi.items[mentionUi.activeIndex] || mentionUi.items[0];
+    if (!selected) return;
+    const forceLineBreak = mentionUi.mode === "participants" && event.key === "Enter";
+    applyMentionSuggestion(selected, { forceLineBreak });
+    return;
+  }
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    hideMentionUi();
+  }
+});
+document.addEventListener("input", (event) => {
+  const target = event.target;
+  if (!isMentionEditableTarget(target)) return;
+  updateMentionUiForTarget(target);
+});
+document.addEventListener(
+  "scroll",
+  () => {
+    if (mentionUi.target && mentionUi.root && !mentionUi.root.classList.contains("hidden")) {
+      positionMentionUi();
+    }
+  },
+  true,
+);
+window.addEventListener("resize", () => {
+  if (mentionUi.target && mentionUi.root && !mentionUi.root.classList.contains("hidden")) {
+    positionMentionUi();
+  }
+});
+document.addEventListener("focusin", (event) => {
+  const target = event.target;
+  if (!isMentionEditableTarget(target)) {
+    hideMentionUi();
+    return;
+  }
+  updateMentionUiForTarget(target);
+});
 
 bindParticipantsInput({
   textarea: els.participantsInput,

@@ -12,7 +12,7 @@ function cleanParticipantToken(token) {
     .replace(/^[-*•\s]+/, "")
     .replace(/^\d+[.)]\s*/, "")
     .replace(/^[А-ЯA-Z]\)\s*/u, "")
-    .replace(/[.;:,\s]+$/, "")
+    .replace(/[;:,\s]+$/, "")
     .trim();
 }
 

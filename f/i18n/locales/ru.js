@@ -50,7 +50,7 @@ export const LOCALE_RU = {
   reports: {
     title: "Отчет по задачам (to be done)",
     byDeadline: "По срокам",
-    byOwner: "По ответственным",
+    byAssignee: "По исполнителям",
     totalTasks: "Всего задач: {count}",
     overdue: "Просрочено: {count}",
     next7Days: "На 7 дней: {count}",
@@ -59,7 +59,7 @@ export const LOCALE_RU = {
   row: {
     taskTitle: "Что сделать",
     value: "Введите значение",
-    taskOwner: "@Ответственный",
+    taskAssignee: "@Исполнитель",
     taskDone: "Выполнено",
     addTask: "Добавить задачу",
     removeTask: "Удалить задачу",
