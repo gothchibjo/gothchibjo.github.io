@@ -37,6 +37,7 @@ import { getRandomHeaderPair } from "./i18n/header-pairs/index.js";
 const DELETE_CONFIRM_TIMEOUT_MS = 3000;
 const MEETING_TITLE_MAX_LENGTH = 160;
 const ACTION_FEEDBACK_MS = 900;
+const HASHTAG_SUGGEST_SORT_MODE = "frequency";
 const activeLocale = resolveLocale();
 const { t, applyToDocument, intlLocale } = createI18n(activeLocale);
 const actionFeedbackTimers = new WeakMap();
@@ -191,7 +192,10 @@ function collectHashtagFrequency(currentMetaRaw = "") {
 
 function collectHashtagCandidates() {
   return [...collectHashtagFrequency(els.meta.value).values()]
-    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, intlLocale))
+    .sort((a, b) => {
+      if (HASHTAG_SUGGEST_SORT_MODE === "alpha") return a.tag.localeCompare(b.tag, intlLocale);
+      return b.count - a.count || a.tag.localeCompare(b.tag, intlLocale);
+    })
     .map((item) => item.tag);
 }
 
