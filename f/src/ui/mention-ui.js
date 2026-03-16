@@ -8,7 +8,9 @@ export function createMentionUiController({
   participantsInput,
   topicsInput,
   decisionsInput,
+  metaInput,
   getParticipantCandidates,
+  getHashtagCandidates,
 }) {
   const mentionUi = {
     root: null,
@@ -18,6 +20,29 @@ export function createMentionUiController({
     rangeEnd: 0,
     activeIndex: 0,
     items: [],
+  };
+
+  const getCandidatesForMode = (mode) => {
+    if (mode === "hashtags") return typeof getHashtagCandidates === "function" ? getHashtagCandidates() : [];
+    return typeof getParticipantCandidates === "function" ? getParticipantCandidates() : [];
+  };
+
+  const extractHashtagsFromText = (rawText) => {
+    const text = rawText || "";
+    const tags = [];
+    const re = /(?:^|\s)#([\p{L}\p{N}_][\p{L}\p{N}_-]*)/gu;
+    let match = re.exec(text);
+    while (match) {
+      tags.push(match[1] || "");
+      match = re.exec(text);
+    }
+    return tags.filter(Boolean);
+  };
+
+  const renderSuggestionValue = (value) => {
+    if (mentionUi.mode === "participants") return value;
+    if (mentionUi.mode === "hashtags") return `#${value}`;
+    return `@${value}`;
   };
 
   const hideMentionUi = () => {
@@ -39,7 +64,7 @@ export function createMentionUiController({
       if (index === mentionUi.activeIndex) button.classList.add("active");
       button.dataset.mentionValue = value;
       button.setAttribute("aria-selected", index === mentionUi.activeIndex ? "true" : "false");
-      button.textContent = mentionUi.mode === "participants" ? value : `@${value}`;
+      button.textContent = renderSuggestionValue(value);
       mentionUi.root.appendChild(button);
     });
   };
@@ -57,8 +82,12 @@ export function createMentionUiController({
     if (!mentionUi.target) return;
     const target = mentionUi.target;
     const { forceLineBreak = false } = options;
-    let replacement = mentionUi.mode === "participants" ? value : `@${value}`;
+    let replacement = renderSuggestionValue(value);
     if (forceLineBreak) replacement = `${replacement}\n`;
+    if (mentionUi.mode === "hashtags" && !forceLineBreak) {
+      const after = target.value.slice(mentionUi.rangeEnd);
+      if (!after || !/^\s/u.test(after)) replacement = `${replacement} `;
+    }
     const nextValue =
       `${target.value.slice(0, mentionUi.rangeStart)}${replacement}${target.value.slice(mentionUi.rangeEnd)}`;
     target.value = nextValue;
@@ -123,6 +152,20 @@ export function createMentionUiController({
       return null;
     }
 
+    if (target === metaInput) {
+      const tagMatch = prefix.match(/(?:^|\s)#([\p{L}\p{N}_-]*)$/u);
+      if (tagMatch) {
+        const query = tagMatch[1] || "";
+        return {
+          mode: "hashtags",
+          query,
+          start: cursorPos - query.length - 1,
+          end: cursorPos,
+        };
+      }
+      return null;
+    }
+
     if (target !== topicsInput && target !== decisionsInput) return null;
 
     const match = prefix.match(/(?:^|\s)@([\p{L}\p{N}_]*)$/u);
@@ -142,17 +185,26 @@ export function createMentionUiController({
     const root = ensureMentionUi();
     mentionUi.mode = context.mode;
     const queryLower = context.query.toLocaleLowerCase();
-    const baseCandidates = getParticipantCandidates();
+    const usedHashtags = (() => {
+      if (context.mode !== "hashtags") return null;
+      const before = target.value.slice(0, context.start);
+      const after = target.value.slice(context.end);
+      const otherText = `${before} ${after}`;
+      return new Set(extractHashtagsFromText(otherText).map((tag) => tag.toLocaleLowerCase()));
+    })();
+    const baseCandidates = getCandidatesForMode(context.mode);
     let nextItems = baseCandidates
       .filter((name) => !queryLower || name.toLocaleLowerCase().includes(queryLower))
+      .filter((name) => !(usedHashtags && usedHashtags.has(name.toLocaleLowerCase())))
       .slice(0, 8);
-    if (context.mode === "participants" && context.query) {
+    if ((context.mode === "participants" || context.mode === "hashtags") && context.query) {
       const exactIndex = nextItems.findIndex((name) => name.toLocaleLowerCase() === queryLower);
       if (exactIndex >= 0) {
         const [exact] = nextItems.splice(exactIndex, 1);
         nextItems.unshift(exact);
       } else {
-        nextItems.unshift(context.query);
+        const isUsed = usedHashtags && usedHashtags.has(queryLower);
+        if (!isUsed) nextItems.unshift(context.query);
       }
       const seen = new Set();
       nextItems = nextItems.filter((name) => {

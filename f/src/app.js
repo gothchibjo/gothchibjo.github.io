@@ -11,6 +11,7 @@ import {
 } from "./topics-input.js";
 import {
   collectDecisionsFromInput,
+  collectHashtagsFromText,
   getTodayIsoLocal,
   hasUserContent,
   normalizeRawText,
@@ -155,11 +156,52 @@ function collectParticipantCandidates() {
     .map((item) => item.name);
 }
 
+function collectHashtagFrequency(currentMetaRaw = "") {
+  const score = new Map();
+  const bump = (tag) => {
+    const cleaned = (tag || "").trim().replace(/^#+/, "");
+    if (!cleaned) return;
+    const key = cleaned.toLocaleLowerCase();
+    const prev = score.get(key);
+    if (prev) {
+      prev.count += 1;
+      return;
+    }
+    score.set(key, { tag: cleaned, count: 1 });
+  };
+
+  const bumpFromText = (tagText) => {
+    const raw = (tagText || "").trim();
+    if (!raw) return;
+    const normalizedSource = raw.startsWith("#") ? raw : `#${raw}`;
+    const extracted = collectHashtagsFromText(normalizedSource);
+    if (extracted.length) {
+      extracted.forEach((tag) => bump(tag));
+      return;
+    }
+    bump(raw);
+  };
+
+  bumpFromText(currentMetaRaw);
+  repository.getDocs().forEach((doc) => bumpFromText(doc.meta || ""));
+
+  bump("followup");
+  return score;
+}
+
+function collectHashtagCandidates() {
+  return [...collectHashtagFrequency(els.meta.value).values()]
+    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, intlLocale))
+    .map((item) => item.tag);
+}
+
 const mentionController = createMentionUiController({
   participantsInput: els.participantsInput,
   topicsInput: els.topicsInput,
   decisionsInput: els.decisionsInput,
+  metaInput: els.meta,
   getParticipantCandidates: collectParticipantCandidates,
+  getHashtagCandidates: collectHashtagCandidates,
 });
 
 function docSnapshot(doc) {

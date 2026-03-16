@@ -37,3 +37,15 @@ export function getTodayIsoLocal() {
   const tzOffsetMs = now.getTimezoneOffset() * 60 * 1000;
   return new Date(now.getTime() - tzOffsetMs).toISOString().slice(0, 10);
 }
+
+export function collectHashtagsFromText(rawText) {
+  const text = rawText || "";
+  const tags = [];
+  const re = /(?:^|\s)#([\p{L}\p{N}_][\p{L}\p{N}_-]*)/gu;
+  let match = re.exec(text);
+  while (match) {
+    tags.push(match[1] || "");
+    match = re.exec(text);
+  }
+  return tags.filter(Boolean);
+}
