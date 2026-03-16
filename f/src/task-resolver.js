@@ -96,6 +96,7 @@ function findLastDueDate(text, locale) {
     /\b\d{1,2}\/\d{4}\b/g,
     /\b\d{1,2}\/\d{1,2}(?:\/\d{2}|\/\d{4})?\b/g,
   ];
+  const keywordPatterns = [/\bASAP\b/gi];
   let last = null;
   datePatterns.forEach((pattern) => {
     for (const match of text.matchAll(pattern)) {
@@ -104,6 +105,14 @@ function findLastDueDate(text, locale) {
       if (!iso) continue;
       const start = match.index || 0;
       const candidate = { value: token, iso, start, end: start + token.length };
+      if (!last || candidate.start >= last.start) last = candidate;
+    }
+  });
+  keywordPatterns.forEach((pattern) => {
+    for (const match of text.matchAll(pattern)) {
+      const token = match[0] || "";
+      const start = match.index || 0;
+      const candidate = { value: token, iso: "ASAP", start, end: start + token.length };
       if (!last || candidate.start >= last.start) last = candidate;
     }
   });
