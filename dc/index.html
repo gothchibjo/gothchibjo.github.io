@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Азбука узора: Цифровой код нации</title>
+  <meta name="description" content="Интерактивная карта народных орнаментов России по федеральным округам. Проект «Компьютерное Зазеркалье», 19 сезон.">
+  <link rel="stylesheet" href="css/map.css">
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ── Шапка ──────────────────────────────────────── -->
+  <header class="page-header">
+    <h1 class="page-title">Азбука узора: <em>Цифровой код нации</em></h1>
+    <p class="page-subtitle">
+      Наведите на округ — увидите национальный узор и народ
+    </p>
+  </header>
+
+  <!-- ── Управление ─────────────────────────────────── -->
+  <div class="controls">
+
+    <!-- Переключатель режима -->
+    <label class="mode-switch" for="mode-checkbox" title="Показать все орнаменты одновременно">
+      <input type="checkbox" id="mode-checkbox">
+      <span class="switch-track"></span>
+      <span class="mode-switch-label">Все орнаменты сразу</span>
+    </label>
+
+    <!-- Кнопка-дубль для удобства -->
+    <button class="toggle-btn" id="toggle-all" aria-pressed="false" title="Переключить режим отображения">
+      <svg class="icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="2" y="2" width="7" height="7" rx="1" fill="currentColor" opacity=".7"/>
+        <rect x="11" y="2" width="7" height="7" rx="1" fill="currentColor"/>
+        <rect x="2" y="11" width="7" height="7" rx="1" fill="currentColor"/>
+        <rect x="11" y="11" width="7" height="7" rx="1" fill="currentColor" opacity=".7"/>
+      </svg>
+      <span class="btn-label">Показать все орнаменты</span>
+    </button>
+
+  </div>
+
+  <!-- ── Карта ───────────────────────────────────────── -->
+  <div class="map-wrap">
+    <svg id="map-svg"
+      xmlns="http://www.w3.org/2000/svg"
+      version="1.0"
+      viewBox="0 0 1091.992 630.119"
+      role="img"
+      aria-label="Карта России по федеральным округам с орнаментами народов">
+      <!-- Содержимое вставляется через JS -->
+    </svg>
+  </div>
+
+  <!-- ── Легенда ─────────────────────────────────────── -->
+  <div class="legend" id="legend" role="list" aria-label="Федеральные округа"></div>
+
+  <!-- ── Подвал ──────────────────────────────────────── -->
+  <footer class="page-footer">
+    <span>«Компьютерное Зазеркалье» · 19 сезон · Информатика, 7 класс</span>
+    <span>Орнаменты: вологодская, карельская, адыгская, кавказская, татарская, хантыйская, бурятская, якутская традиции</span>
+  </footer>
+
+</div><!-- .page -->
+
+<!-- ── Тултип ─────────────────────────────────────────── -->
+<div id="tooltip" role="tooltip" aria-hidden="true">
+  <div class="tt-district" id="tt-district"></div>
+  <div class="tt-people"   id="tt-people"></div>
+  <div class="tt-ornament" id="tt-ornament"></div>
+</div>
+
+<!-- ── Скрипты (ES-модули) ─────────────────────────────── -->
+<script type="module">
+  import { MAP_SVG_INNER } from './js/map-data.js';
+  import { initMap }        from './js/map.js';
+
+  // Синхронизация чекбокса и кнопки
+  const checkbox = document.getElementById('mode-checkbox');
+  const btn      = document.getElementById('toggle-all');
+
+  checkbox.addEventListener('change', () => {
+    btn.click();  // делегируем в map.js через кнопку
+  });
+
+  // Запуск
+  initMap(MAP_SVG_INNER);
+</script>
+
+</body>
+</html>

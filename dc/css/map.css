@@ -1,0 +1,315 @@
+/* ═══════════════════════════════════════════════════════
+   Азбука узора: Цифровой код нации
+   map.css — основные стили
+   ═══════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Raleway:wght@300;400;600&display=swap');
+
+/* ── Переменные ─────────────────────────────────────── */
+:root {
+  --bg:        #f2ede4;
+  --bg-card:   rgba(255,255,255,0.82);
+  --text:      #1a1008;
+  --text-dim:  #8a7060;
+  --gold:      #c9952a;
+  --red:       #8b1a1a;
+  --border:    rgba(0,0,0,0.12);
+  --shadow:    0 2px 16px rgba(0,0,0,0.13);
+  --radius:    6px;
+  --trans:     0.38s cubic-bezier(.4,0,.2,1);
+}
+
+/* ── Reset ──────────────────────────────────────────── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Raleway', sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* ── Layout ─────────────────────────────────────────── */
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 1.6rem 2rem 1.2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* ── Header ─────────────────────────────────────────── */
+.page-header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: .4rem 1.4rem;
+  margin-bottom: 1rem;
+}
+
+.page-title {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(1.3rem, 2.4vw, 2rem);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.page-title em {
+  color: var(--gold);
+  font-style: normal;
+}
+
+.page-subtitle {
+  font-size: .78rem;
+  color: var(--text-dim);
+  letter-spacing: .04em;
+  flex: 1;
+}
+
+/* ── Toggle control ─────────────────────────────────── */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  margin-bottom: .9rem;
+  flex-wrap: wrap;
+}
+
+.toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .45rem 1.1rem;
+  border-radius: 2rem;
+  border: 1.5px solid var(--border);
+  background: var(--bg-card);
+  font-family: 'Raleway', sans-serif;
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all var(--trans);
+  letter-spacing: .04em;
+  user-select: none;
+  backdrop-filter: blur(4px);
+}
+
+.toggle-btn:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(255,255,255,0.95);
+}
+
+.toggle-btn.active {
+  background: var(--text);
+  color: #f5ede0;
+  border-color: var(--text);
+}
+
+.toggle-btn .icon {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex-shrink: 0;
+}
+
+/* Toggle switch (all-patterns mode) */
+.mode-switch {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  font-size: .8rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.mode-switch input[type="checkbox"] {
+  display: none;
+}
+
+.switch-track {
+  width: 38px;
+  height: 20px;
+  background: #ccc;
+  border-radius: 10px;
+  position: relative;
+  transition: background var(--trans);
+  flex-shrink: 0;
+}
+
+.switch-track::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  top: 3px;
+  left: 3px;
+  transition: transform var(--trans);
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+
+.mode-switch input:checked + .switch-track {
+  background: var(--gold);
+}
+
+.mode-switch input:checked + .switch-track::after {
+  transform: translateX(18px);
+}
+
+.mode-switch-label {
+  font-weight: 600;
+  transition: color var(--trans);
+}
+
+.mode-switch input:checked ~ .mode-switch-label {
+  color: var(--gold);
+}
+
+/* ── Map ─────────────────────────────────────────────── */
+.map-wrap {
+  flex: 1;
+  position: relative;
+}
+
+#map-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  filter: drop-shadow(0 2px 14px rgba(0,0,0,.14));
+}
+
+/* District elements */
+[data-d] {
+  cursor: pointer;
+  transition: opacity .2s, filter .2s;
+}
+
+[data-d]:hover {
+  filter: brightness(1.08);
+}
+
+/* ── Tooltip ─────────────────────────────────────────── */
+#tooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 200;
+  background: rgba(18,10,4,0.93);
+  color: #f5ede0;
+  border-radius: var(--radius);
+  padding: .6rem .9rem;
+  max-width: 230px;
+  border-left: 3px solid var(--gold);
+  box-shadow: 0 4px 20px rgba(0,0,0,.35);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .15s, transform .15s;
+  backdrop-filter: blur(6px);
+}
+
+#tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+#tooltip .tt-district {
+  font-size: .68rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #9a8060;
+  margin-bottom: .18rem;
+}
+
+#tooltip .tt-people {
+  font-family: 'Playfair Display', serif;
+  font-size: .95rem;
+  color: var(--gold);
+  line-height: 1.3;
+  margin-bottom: .22rem;
+}
+
+#tooltip .tt-ornament {
+  font-size: .73rem;
+  color: #c8a888;
+  line-height: 1.5;
+}
+
+/* ── Legend ──────────────────────────────────────────── */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem .9rem;
+  margin-top: .85rem;
+  padding-top: .65rem;
+  border-top: 1px solid var(--border);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: .38rem;
+  font-size: .72rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: .18rem .35rem;
+  border-radius: 3px;
+  transition: background .18s, color .18s;
+  border: 1px solid transparent;
+}
+
+.legend-item:hover,
+.legend-item.highlighted {
+  background: rgba(0,0,0,.06);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.legend-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
+  border: 1px solid rgba(0,0,0,.15);
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: transform .2s;
+}
+
+.legend-item:hover .legend-swatch {
+  transform: scale(1.2);
+}
+
+.legend-swatch svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* ── All-patterns mode ───────────────────────────────── */
+/* When .all-patterns is on body, all regions show patterns */
+body.all-patterns [data-d] {
+  /* patterns applied via JS */
+}
+
+/* ── Footer ──────────────────────────────────────────── */
+.page-footer {
+  margin-top: .8rem;
+  padding-top: .5rem;
+  border-top: 1px solid var(--border);
+  font-size: .68rem;
+  color: var(--text-dim);
+  letter-spacing: .06em;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .3rem;
+}
+
+/* ── Responsive ──────────────────────────────────────── */
+@media (max-width: 640px) {
+  .page { padding: 1rem 1rem .8rem; }
+  .page-title { font-size: 1.2rem; }
+  .controls { gap: .7rem; }
+}
