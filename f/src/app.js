@@ -157,6 +157,31 @@ function collectParticipantCandidates() {
     .map((item) => item.name);
 }
 
+function collectMeetingTitleFrequency(currentTitle = "") {
+  const score = new Map();
+  const bump = (title) => {
+    const cleaned = (title || "").trim();
+    if (!cleaned) return;
+    const key = cleaned.toLocaleLowerCase();
+    const prev = score.get(key);
+    if (prev) {
+      prev.count += 1;
+      return;
+    }
+    score.set(key, { title: cleaned, count: 1 });
+  };
+
+  bump(currentTitle);
+  repository.getDocs().forEach((doc) => bump(doc.meetingTitle || ""));
+  return score;
+}
+
+function collectMeetingTitleCandidates() {
+  return [...collectMeetingTitleFrequency(els.meetingTitle.value).values()]
+    .sort((a, b) => b.count - a.count || a.title.localeCompare(b.title, intlLocale))
+    .map((item) => item.title);
+}
+
 function collectHashtagFrequency(currentMetaRaw = "") {
   const score = new Map();
   const bump = (tag) => {
@@ -200,10 +225,12 @@ function collectHashtagCandidates() {
 }
 
 const mentionController = createMentionUiController({
+  titleInput: els.meetingTitle,
   participantsInput: els.participantsInput,
   topicsInput: els.topicsInput,
   decisionsInput: els.decisionsInput,
   metaInput: els.meta,
+  getTitleCandidates: collectMeetingTitleCandidates,
   getParticipantCandidates: collectParticipantCandidates,
   getHashtagCandidates: collectHashtagCandidates,
 });

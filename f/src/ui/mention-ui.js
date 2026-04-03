@@ -5,10 +5,12 @@ function isEditableTarget(target) {
 }
 
 export function createMentionUiController({
+  titleInput,
   participantsInput,
   topicsInput,
   decisionsInput,
   metaInput,
+  getTitleCandidates,
   getParticipantCandidates,
   getHashtagCandidates,
 }) {
@@ -23,6 +25,7 @@ export function createMentionUiController({
   };
 
   const getCandidatesForMode = (mode) => {
+    if (mode === "title") return typeof getTitleCandidates === "function" ? getTitleCandidates() : [];
     if (mode === "hashtags") return typeof getHashtagCandidates === "function" ? getHashtagCandidates() : [];
     return typeof getParticipantCandidates === "function" ? getParticipantCandidates() : [];
   };
@@ -40,7 +43,7 @@ export function createMentionUiController({
   };
 
   const renderSuggestionValue = (value) => {
-    if (mentionUi.mode === "participants") return value;
+    if (mentionUi.mode === "participants" || mentionUi.mode === "title") return value;
     if (mentionUi.mode === "hashtags") return `#${value}`;
     return `@${value}`;
   };
@@ -118,6 +121,19 @@ export function createMentionUiController({
     if (!isEditableTarget(target)) return null;
     const cursorPos = typeof target.selectionStart === "number" ? target.selectionStart : target.value.length;
     const prefix = target.value.slice(0, cursorPos);
+
+    if (target === titleInput) {
+      const query = (target.value || "").trim();
+      if (query) {
+        return {
+          mode: "title",
+          query,
+          start: 0,
+          end: target.value.length,
+        };
+      }
+      return null;
+    }
 
     if (target === participantsInput) {
       const participantMatch = prefix.match(/(?:^|[\n;,])\s*(?:[-*•]\s*)?([\p{L}\p{N}_][\p{L}\p{N}_'`\- ]*)$/u);
@@ -214,8 +230,17 @@ export function createMentionUiController({
         return true;
       });
     }
+    if (context.mode === "title") {
+      const seen = new Set();
+      nextItems = nextItems.filter((name) => {
+        const key = name.toLocaleLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
     mentionUi.items = nextItems.slice(0, 8);
-    if (!mentionUi.items.length && context.query) mentionUi.items = [context.query];
+    if (!mentionUi.items.length && context.query && context.mode !== "title") mentionUi.items = [context.query];
     if (!mentionUi.items.length) {
       hideMentionUi();
       return;
@@ -290,9 +315,13 @@ export function createMentionUiController({
         event.preventDefault();
         const selected = mentionUi.items[mentionUi.activeIndex] || mentionUi.items[0];
         if (!selected) return true;
+        const selectedMode = mentionUi.mode;
         const forceLineBreak =
           mentionUi.mode === "participants" && mentionUi.target === participantsInput && event.key === "Enter";
         applyMentionSuggestion(selected, { forceLineBreak });
+        if (selectedMode === "title" && event.key === "Enter" && participantsInput) {
+          participantsInput.focus();
+        }
         return true;
       }
 
