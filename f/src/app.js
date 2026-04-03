@@ -330,6 +330,7 @@ function collectRows(type) {
 }
 
 function collectForm() {
+  const storedDoc = repository.findSavedDocById(state.currentId);
   return {
     id: state.currentId || uid(),
     meetingDate: els.meetingDate.value,
@@ -342,6 +343,8 @@ function collectForm() {
     topics: collectTopicsFromInput(els.topicsInput.value),
     decisions: collectDecisionsFromInput(els.decisionsInput.value),
     tasks: collectRows("tasks"),
+    basedOnDocId: storedDoc?.basedOnDocId || "",
+    basedOnDocUrl: storedDoc?.basedOnDocUrl || "",
     updatedAt: new Date().toISOString(),
   };
 }
@@ -433,13 +436,21 @@ function saveAsNewDoc() {
     return false;
   }
 
+  const sourceDoc = repository.findSavedDocById(doc.id);
   const docs = repository.getDocs();
-  const next = { ...doc, id: uid(), updatedAt: new Date().toISOString() };
+  const next = {
+    ...doc,
+    id: uid(),
+    meetingDate: getTodayIsoLocal(),
+    basedOnDocId: sourceDoc?.id || "",
+    basedOnDocUrl: sourceDoc ? getDocUrl(sourceDoc.id) : "",
+    updatedAt: new Date().toISOString(),
+  };
   docs.unshift(next);
   state.currentId = next.id;
 
   repository.setDocs(docs);
-  updatePreview();
+  fillForm(next);
   renderStoredDocs();
   showActionSuccess(els.saveAsNewBtn);
   return true;
