@@ -33,7 +33,7 @@ export const LOCALE_RU = {
     copyLink: "Копировать ссылку",
     exportMd: "Экспорт в MD",
     exportDocx: "Экспорт в DOCX",
-    exportPdf: "Экспорт в PDF",
+    exportPdf: "Сохранить в PDF (через печать)",
   },
   stored: {
     title: "Сохраненные документы",
@@ -89,7 +89,6 @@ export const LOCALE_RU = {
     unsavedOpenTitle: "Есть несохраненные изменения",
     unsavedOpenText: "Сохраните изменения перед открытием другого документа.",
     deleteStoredDoc: "Удалить сохраненный документ?",
-    pdfMissing: "PDF библиотека не загружена",
     exportDocxError: "Ошибка экспорта DOCX",
   },
 };

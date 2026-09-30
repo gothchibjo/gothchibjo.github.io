@@ -33,7 +33,7 @@ export const LOCALE_EN = {
     copyLink: "Copy link",
     exportMd: "Export to MD",
     exportDocx: "Export to DOCX",
-    exportPdf: "Export to PDF",
+    exportPdf: "Save as PDF (print dialog)",
   },
   stored: {
     title: "Saved documents",
@@ -89,7 +89,6 @@ export const LOCALE_EN = {
     unsavedOpenTitle: "Unsaved changes",
     unsavedOpenText: "Save your current changes before opening another saved document.",
     deleteStoredDoc: "Delete saved document?",
-    pdfMissing: "PDF library is not loaded",
     exportDocxError: "DOCX export error",
   },
 };

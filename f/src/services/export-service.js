@@ -7,7 +7,17 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-export function createExportService({ t, generateText, generateMarkdownText }) {
+function ensurePrintNode() {
+  const existing = document.getElementById("print-protocol");
+  if (existing) return existing;
+  const node = document.createElement("pre");
+  node.id = "print-protocol";
+  node.className = "print-protocol";
+  document.body.appendChild(node);
+  return node;
+}
+
+export function createExportService({ t, generateText, generateMarkdownText, renderPreviewText }) {
   const exportMd = (doc) => {
     const blob = new Blob([generateMarkdownText(doc)], { type: "text/markdown;charset=utf-8" });
     downloadBlob(blob, `${doc.meetingDate || t("common.fileBase")}-${doc.id}.md`);
@@ -23,18 +33,21 @@ export function createExportService({ t, generateText, generateMarkdownText }) {
 
   const exportPdf = (doc) => {
     const text = generateText(doc);
-    const jsPdf = window.jspdf?.jsPDF;
-    if (!jsPdf) {
-      alert(t("alerts.pdfMissing"));
-      return;
-    }
+    if (!text.trim()) return;
 
-    const pdf = new jsPdf({ unit: "pt", format: "a4" });
-    const lines = pdf.splitTextToSize(text, 520);
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(11);
-    pdf.text(lines, 36, 48);
-    pdf.save(`${doc.meetingDate || t("common.fileBase")}-${doc.id}.pdf`);
+    ensurePrintNode().innerHTML = renderPreviewText(text);
+
+    const previousTitle = document.title;
+    const restoreTitle = () => {
+      document.title = previousTitle;
+    };
+    document.addEventListener("afterprint", restoreTitle, { once: true });
+    document.title = `${doc.meetingDate || t("common.fileBase")}-${doc.id}`;
+    try {
+      window.print();
+    } finally {
+      window.setTimeout(restoreTitle, 0);
+    }
   };
 
   return {

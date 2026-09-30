@@ -116,6 +116,7 @@ const exportService = createExportService({
   t,
   generateText,
   generateMarkdownText,
+  renderPreviewText,
 });
 
 function applyRandomHeaderPair() {
